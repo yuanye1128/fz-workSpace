@@ -107,7 +107,7 @@ struct RepositoryConfigView: View {
                         .foregroundStyle(DevFlowTheme.accent)
                     Text("这个项目还没有代码仓库")
                         .font(.system(size: 17, weight: .semibold))
-                    Text("添加本地 Git 仓库后，才能从工单启动 Codex 或 Cursor。")
+                    Text("添加本地 Git 仓库后，才能从工单启动 Codex、Cursor 或 Claude Code。")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                     Button("选择仓库目录") { showingImporter = true }

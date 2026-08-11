@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct TicketCardView: View {
@@ -36,9 +37,18 @@ struct TicketCardView: View {
 
             VStack(alignment: .leading, spacing: 13) {
                 HStack {
-                    Text(ticket.issueNumber)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(selected ? DevFlowTheme.accent : .secondary)
+                    Button {
+                        if let url = ticket.sourceURL {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        Text(ticket.issueNumber)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(selected ? DevFlowTheme.accent : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(ticket.sourceURL == nil)
+                    .help(ticket.sourceURL == nil ? "暂无原工单地址" : "打开原工单")
                     Spacer()
                     Text(ticket.projectName)
                         .font(.system(size: 12, weight: .medium))
@@ -58,7 +68,7 @@ struct TicketCardView: View {
                     .frame(maxWidth: .infinity, minHeight: 40, alignment: .topLeading)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text(ticket.description)
+                Text(ticket.displayDescription)
                     .font(.system(size: 13, weight: .regular))
                     .foregroundStyle(DevFlowTheme.secondaryText(colorScheme))
                     .lineSpacing(4)
@@ -158,9 +168,18 @@ struct TicketListRow: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 10) {
-                    Text(ticket.issueNumber)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(selected ? DevFlowTheme.accent : .secondary)
+                    Button {
+                        if let url = ticket.sourceURL {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        Text(ticket.issueNumber)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(selected ? DevFlowTheme.accent : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(ticket.sourceURL == nil)
+                    .help(ticket.sourceURL == nil ? "暂无原工单地址" : "打开原工单")
                     Text(ticket.title)
                         .font(.system(size: 14, weight: .semibold))
                         .lineLimit(1)

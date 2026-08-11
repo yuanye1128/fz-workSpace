@@ -85,7 +85,9 @@ struct SettingsView: View {
                 settingsSection("AI 工具") {
                     ToolStatusRow(name: "Codex", command: "codex")
                     Divider()
-                    ToolStatusRow(name: "Cursor", command: "agent")
+                    ToolStatusRow(name: "Cursor", command: "cursor-agent")
+                    Divider()
+                    ToolStatusRow(name: "Claude Code", command: "claude")
                 }
 
                 settingsSection("交付默认值") {

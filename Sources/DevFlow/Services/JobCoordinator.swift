@@ -40,11 +40,11 @@ final class JobCoordinator {
                 guard validation.isGitRepository else {
                     throw JobError.repository(validation.message)
                 }
-                guard validation.isClean else {
-                    throw JobError.repository(validation.message)
+                if validation.isClean {
+                    append("仓库校验通过，当前分支：\(validation.currentBranch)", to: item.id)
+                } else {
+                    append("检测到本地未提交改动，已保留并继续；当前分支：\(validation.currentBranch)", to: item.id)
                 }
-
-                append("仓库校验通过，当前分支：\(validation.currentBranch)", to: item.id)
                 try await gitService.checkoutBranch(branch, at: repository.path)
                 append("已切换到分支：\(branch)", to: item.id)
                 setStage(.runningAI, for: item.id)

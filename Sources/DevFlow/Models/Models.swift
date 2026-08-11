@@ -60,6 +60,30 @@ struct Ticket: Identifiable, Codable, Hashable {
 
     var issueNumber: String { "#\(id)" }
 
+    /// 去掉知识库抓取时夹带的「引用 / 描述」等标签噪音
+    var displayDescription: String {
+        Self.sanitizedDescription(description)
+    }
+
+    static func sanitizedDescription(_ raw: String) -> String {
+        var text = raw
+        let patterns = [
+            #"^\s*引用\s*(?:\r?\n[ \t]*)+\s*描述\s*(?:\r?\n[ \t]*)+"#,
+            #"^\s*描述\s*(?:\r?\n[ \t]*)+"#,
+            #"^\s*引用\s*(?:\r?\n[ \t]*)+"#
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(text.startIndex..., in: text)
+            let replaced = regex.stringByReplacingMatches(in: text, range: range, withTemplate: "")
+            if replaced != text {
+                text = replaced
+                break
+            }
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var requiresAuthorReassignment: Bool {
         kind == .bug || kind == .support
     }
@@ -82,6 +106,7 @@ struct RepositoryConfig: Identifiable, Codable, Hashable {
 enum AIProvider: String, Codable, CaseIterable, Identifiable {
     case codex = "Codex"
     case cursor = "Cursor"
+    case claude = "Claude Code"
 
     var id: String { rawValue }
 }

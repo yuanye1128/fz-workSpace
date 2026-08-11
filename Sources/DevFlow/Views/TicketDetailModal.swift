@@ -133,7 +133,7 @@ struct TicketDetailModal: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 17) {
                         SectionLabel(title: "解决配置")
-                            .id(Field.helper)
+                            .id("solve-config")
 
                         repositoryPicker
                         branchField
@@ -147,7 +147,8 @@ struct TicketDetailModal: View {
                 .frame(width: 420)
                 .onChange(of: appState.focusSolveConfiguration) { shouldFocus in
                     if shouldFocus {
-                        withAnimation { proxy.scrollTo(Field.helper, anchor: .top) }
+                        withAnimation { proxy.scrollTo("solve-config", anchor: .top) }
+                        focusedField = .helper
                     }
                 }
             }
@@ -165,7 +166,7 @@ struct TicketDetailModal: View {
     private var ticketInformation: some View {
         VStack(alignment: .leading, spacing: 20) {
             SectionLabel(title: "工单描述")
-            Text(ticket.description)
+            Text(ticket.displayDescription)
                 .font(.system(size: 14))
                 .foregroundStyle(Color.primary.opacity(0.86))
                 .lineSpacing(6)

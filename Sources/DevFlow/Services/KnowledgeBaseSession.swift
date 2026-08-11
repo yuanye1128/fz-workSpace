@@ -292,7 +292,9 @@ final class KnowledgeBaseSessionController: NSObject, ObservableObject, WKNaviga
                 if (!response.ok) continue;
                 const html = await response.text();
                 const doc = new DOMParser().parseFromString(html, 'text/html');
-                ticket.description = doc.querySelector('.description .wiki, #issue_description_wiki, .issue .description')?.textContent?.trim() || '';
+                ticket.description = doc.querySelector('#issue_description_wiki, .description .wiki')?.textContent?.trim() || '';
+                ticket.description = ticket.description.replace(/^\\s*引用\\s*(?:\\r?\\n[ \\t]*)+\\s*描述\\s*(?:\\r?\\n[ \\t]*)+/, '').trim();
+                ticket.description = ticket.description.replace(/^\\s*(?:引用|描述)\\s*(?:\\r?\\n[ \\t]*)+/, '').trim();
                 if (!ticket.author) {
                   ticket.author = doc.querySelector('.issue .author a')?.textContent?.trim() || '';
                 }
@@ -358,7 +360,10 @@ private struct KBTicket: Decodable {
             priority: priority.contains("紧急") ? .urgent : (priority.contains("高") ? .high : .normal),
             status: mapStatus(status),
             title: subject,
-            description: description.isEmpty ? "知识库列表未提供描述，打开原工单可查看完整内容。" : description,
+            description: {
+                let cleaned = Ticket.sanitizedDescription(description)
+                return cleaned.isEmpty ? "知识库列表未提供描述，打开原工单可查看完整内容。" : cleaned
+            }(),
             targetVersion: version.isEmpty ? "未指定" : version,
             updatedAt: parsedUpdatedAt,
             assignee: assignee,

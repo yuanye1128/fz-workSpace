@@ -43,6 +43,15 @@ final class AIService: @unchecked Sendable {
                 "--output-format", "stream-json",
                 prompt
             ]
+        case .claude:
+            command = "claude"
+            arguments = [
+                "-p",
+                "--output-format", "stream-json",
+                "--verbose",
+                "--permission-mode", "bypassPermissions",
+                prompt
+            ]
         }
 
         var finalMessage = ""
@@ -83,7 +92,8 @@ final class AIService: @unchecked Sendable {
         }
 
         let type = json["type"] as? String ?? ""
-        if provider == .cursor {
+        switch provider {
+        case .cursor:
             if type == "assistant",
                let message = json["message"] as? [String: Any],
                let content = message["content"] as? [[String: Any]],
@@ -96,7 +106,33 @@ final class AIService: @unchecked Sendable {
             if type == "result", let result = json["result"] as? String {
                 return ("Cursor 已完成", result)
             }
-        } else {
+        case .claude:
+            if type == "system", let subtype = json["subtype"] as? String, subtype == "init" {
+                let model = json["model"] as? String
+                return (model.map { "Claude Code 已启动（\($0)）" } ?? "Claude Code 已启动", nil)
+            }
+            if type == "assistant" {
+                let content = (json["message"] as? [String: Any])?["content"] as? [[String: Any]]
+                    ?? json["content"] as? [[String: Any]]
+                if let blocks = content {
+                    if let text = blocks.first(where: { ($0["type"] as? String) == "text" })?["text"] as? String, !text.isEmpty {
+                        return (text, nil)
+                    }
+                    if let tool = blocks.first(where: { ($0["type"] as? String) == "tool_use" }),
+                       let name = tool["name"] as? String {
+                        return ("Claude Code 正在调用工具：\(name)", nil)
+                    }
+                }
+            }
+            if type == "result" {
+                let result = json["result"] as? String
+                let isError = json["is_error"] as? Bool ?? false
+                if isError {
+                    return (result ?? "Claude Code 执行失败", result)
+                }
+                return ("Claude Code 已完成", result)
+            }
+        case .codex:
             if type == "item.completed",
                let item = json["item"] as? [String: Any],
                let itemType = item["type"] as? String,
@@ -125,7 +161,7 @@ enum PromptBuilder {
         优先级：\(ticket.priority.rawValue)
         标题：\(ticket.title)
         描述：
-        \(ticket.description)
+        \(ticket.displayDescription)
 
         用户提供的辅助定位信息：
         \(helperContext.isEmpty ? "未提供，请自行在仓库中定位。" : helperContext)

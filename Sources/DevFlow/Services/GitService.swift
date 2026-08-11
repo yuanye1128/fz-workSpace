@@ -32,7 +32,7 @@ final class GitService: @unchecked Sendable {
                 isClean: isClean,
                 currentBranch: branch.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines),
                 remoteURL: remote?.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
-                message: isClean ? "仓库状态正常" : "仓库存在未提交改动，为避免覆盖已阻止任务"
+                message: isClean ? "仓库状态正常" : "仓库存在未提交改动（将保留并继续）"
             )
         } catch {
             return RepositoryValidation(isGitRepository: false, isClean: false, currentBranch: "", remoteURL: "", message: error.localizedDescription)
