@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import SwiftUI
 
 @MainActor
 final class AppState: ObservableObject {
@@ -27,8 +28,14 @@ final class AppState: ObservableObject {
     @Published var showingNewTicketsPopover = false
     @Published var newTicketNotifications: [Ticket] = []
     @Published var themePreference: ThemePreference = .system {
-        didSet { UserDefaults.standard.set(themePreference.rawValue, forKey: "themePreference") }
+        didSet {
+            guard oldValue != themePreference else { return }
+            UserDefaults.standard.set(themePreference.rawValue, forKey: "themePreference")
+            applyAppearance()
+        }
     }
+    /// 每次主题应用后递增，强制 SwiftUI 重建根视图以清除旧的 preferredColorScheme 缓存
+    @Published private(set) var themeRevision = 0
     @Published var knowledgeBaseURL = KnowledgeBaseQuery.allAssignedIssuesURL
     @Published var defaultTestAssignee = ""
     @Published var selectedTicketForReport: Ticket?
@@ -37,13 +44,83 @@ final class AppState: ObservableObject {
     lazy var knowledgeBaseSession = KnowledgeBaseSessionController()
     lazy var jobCoordinator = JobCoordinator(appState: self)
     private var syncInProgress = false
+    private var systemThemeObserver: NSObjectProtocol?
 
     init() {
         if let storedTheme = UserDefaults.standard.string(forKey: "themePreference"),
            let preference = ThemePreference(rawValue: storedTheme) {
+            // 直接赋值会触发 didSet；先静默写入再统一 apply
             themePreference = preference
         }
         loadPersistedState()
+        applyAppearance()
+        observeSystemThemeChanges()
+    }
+
+    deinit {
+        if let systemThemeObserver {
+            DistributedNotificationCenter.default().removeObserver(systemThemeObserver)
+        }
+    }
+
+    /// SwiftUI 使用的颜色方案：跟随系统时解析为当前系统深/浅，避免 preferredColorScheme(nil) 失效。
+    var preferredSwiftUIColorScheme: ColorScheme {
+        switch themePreference {
+        case .light: .light
+        case .dark: .dark
+        case .system: Self.systemIsDark ? .dark : .light
+        }
+    }
+
+    private static var systemIsDark: Bool {
+        if UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark" {
+            return true
+        }
+        // 应用外观被强制覆盖时，effectiveAppearance 不可靠；再读一次系统外观名
+        let appearance = NSApp.effectiveAppearance
+        let match = appearance.bestMatch(from: [.darkAqua, .aqua])
+        return match == .darkAqua
+    }
+
+    func applyAppearance() {
+        switch themePreference {
+        case .system:
+            NSApp.appearance = nil
+            for window in NSApp.windows {
+                window.appearance = nil
+            }
+        case .light:
+            let appearance = NSAppearance(named: .aqua)
+            NSApp.appearance = appearance
+            for window in NSApp.windows {
+                window.appearance = appearance
+            }
+        case .dark:
+            let appearance = NSAppearance(named: .darkAqua)
+            NSApp.appearance = appearance
+            for window in NSApp.windows {
+                window.appearance = appearance
+            }
+        }
+        themeRevision &+= 1
+    }
+
+    private func observeSystemThemeChanges() {
+        systemThemeObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.themePreference == .system else { return }
+                // 系统深浅切换后，清掉窗口覆盖并刷新 SwiftUI
+                NSApp.appearance = nil
+                for window in NSApp.windows {
+                    window.appearance = nil
+                }
+                self.themeRevision &+= 1
+            }
+        }
     }
 
     /// 没有任何缓存工单且尚未建立会话时，首页才展示登录引导。

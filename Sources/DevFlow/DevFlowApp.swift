@@ -9,10 +9,12 @@ struct DevFlowApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(appState)
-                .preferredColorScheme(appState.themePreference.colorScheme)
+                .preferredColorScheme(appState.preferredSwiftUIColorScheme)
+                .id(appState.themeRevision)
                 .frame(minWidth: 1024, minHeight: 700)
                 .onAppear {
                     NSWindow.allowsAutomaticWindowTabbing = false
+                    appState.applyAppearance()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     let state = appState
@@ -30,7 +32,8 @@ struct DevFlowApp: App {
         Settings {
             SettingsView()
                 .environmentObject(appState)
-                .preferredColorScheme(appState.themePreference.colorScheme)
+                .preferredColorScheme(appState.preferredSwiftUIColorScheme)
+                .id(appState.themeRevision)
                 .frame(width: 720, height: 560)
         }
     }
