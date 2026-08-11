@@ -5,6 +5,11 @@ struct AIExecutionResult: Sendable {
     var rawOutput: String
 }
 
+struct AIExecutionStreamEvent: Sendable {
+    var displayMessage: String?
+    var byteOffset: Int64
+}
+
 enum AIExecutionMode: Sendable {
     case analysis
     case modification(confirmedPlan: String)
@@ -13,23 +18,27 @@ enum AIExecutionMode: Sendable {
         if case .analysis = self { return true }
         return false
     }
+
+    var phase: AIExecutionPhase {
+        isAnalysis ? .analysis : .modification
+    }
 }
 
 final class AIService: @unchecked Sendable {
-    private let runner: ProcessRunner
+    private let runner: DurableProcessRunner
 
-    init(runner: ProcessRunner = ProcessRunner()) {
+    init(runner: DurableProcessRunner = DurableProcessRunner()) {
         self.runner = runner
     }
 
     func run(
-        itemID: UUID,
         provider: AIProvider,
         ticket: Ticket,
         repositoryPath: String,
         helperContext: String,
         mode: AIExecutionMode,
-        onEvent: @escaping @Sendable (String) -> Void
+        onStarted: @escaping @Sendable (AIExecutionRecord) async -> Void,
+        onEvent: @escaping @Sendable (AIExecutionStreamEvent) async -> Void
     ) async throws -> AIExecutionResult {
         let prompt: String
         switch mode {
@@ -71,23 +80,53 @@ final class AIService: @unchecked Sendable {
             ]
         }
 
-        var finalMessage = ""
-        let result = try await runner.run(
-            id: itemID,
+        let execution = try runner.start(
+            phase: mode.phase,
             command: command,
             arguments: arguments,
             workingDirectory: repositoryPath
-        ) { line in
+        )
+        await onStarted(execution)
+        let result = try await runner.monitor(execution: execution) { line, offset in
             let event = Self.parseEvent(line, provider: provider)
-            if let message = event.displayMessage, !message.isEmpty {
-                onEvent(message)
-            }
+            await onEvent(AIExecutionStreamEvent(displayMessage: event.displayMessage, byteOffset: offset))
         }
 
+        return try Self.executionResult(from: result, command: command, provider: provider)
+    }
+
+    func resume(
+        execution: AIExecutionRecord,
+        provider: AIProvider,
+        onEvent: @escaping @Sendable (AIExecutionStreamEvent) async -> Void
+    ) async throws -> AIExecutionResult {
+        let result = try await runner.monitor(execution: execution) { line, offset in
+            let event = Self.parseEvent(line, provider: provider)
+            await onEvent(AIExecutionStreamEvent(displayMessage: event.displayMessage, byteOffset: offset))
+        }
+        return try Self.executionResult(from: result, command: provider.rawValue, provider: provider)
+    }
+
+    func inspect(execution: AIExecutionRecord) -> DurableExecutionStatus {
+        runner.inspect(execution: execution)
+    }
+
+    func cancel(execution: AIExecutionRecord) {
+        runner.cancel(execution: execution)
+    }
+
+    private static func executionResult(
+        from result: DurableProcessResult,
+        command: String,
+        provider: AIProvider
+    ) throws -> AIExecutionResult {
         guard result.exitCode == 0 else {
-            throw ProcessRunnerError.failed(command: command, code: result.exitCode, message: result.standardError.isEmpty ? result.standardOutput : result.standardError)
+            let message = result.launchError
+                ?? (result.standardError.isEmpty ? result.standardOutput : result.standardError)
+            throw ProcessRunnerError.failed(command: command, code: result.exitCode, message: message)
         }
 
+        var finalMessage = ""
         for line in result.standardOutput.split(separator: "\n").map(String.init) {
             let event = Self.parseEvent(line, provider: provider)
             if let final = event.finalMessage, !final.isEmpty {
@@ -96,10 +135,6 @@ final class AIService: @unchecked Sendable {
         }
         if finalMessage.isEmpty { finalMessage = result.standardOutput }
         return AIExecutionResult(finalMessage: finalMessage, rawOutput: result.standardOutput + result.standardError)
-    }
-
-    func cancel(itemID: UUID) {
-        runner.cancel(id: itemID)
     }
 
     private static func parseEvent(_ line: String, provider: AIProvider) -> (displayMessage: String?, finalMessage: String?) {

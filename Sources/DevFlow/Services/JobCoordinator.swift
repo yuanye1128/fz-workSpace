@@ -6,6 +6,7 @@ final class JobCoordinator {
     private let gitService = GitService()
     private let aiService = AIService()
     private var tasks: [UUID: Task<Void, Never>] = [:]
+    private var didRecoverPersistedJobs = false
 
     init(appState: AppState) {
         self.appState = appState
@@ -40,44 +41,39 @@ final class JobCoordinator {
         guard let item = item(id: itemID), item.stage == .awaitingPlanApproval,
               let ticket = appState.tickets.first(where: { $0.id == item.ticketID }) else { return }
 
-        setStage(.runningAI, for: itemID)
-        append("修改方案已确认，正在开始修改代码", to: itemID)
+        updateItem(itemID) {
+            $0.stage = .runningAI
+            $0.execution = nil
+            $0.errorMessage = nil
+            $0.updatedAt = Date()
+            $0.logs.append(JobLogEntry(message: "修改方案已确认，正在开始修改代码"))
+        }
 
         let task = Task { [weak self] in
             guard let self else { return }
             do {
                 let execution = try await aiService.run(
-                    itemID: item.id,
                     provider: item.provider,
                     ticket: ticket,
                     repositoryPath: item.repositoryPath,
                     helperContext: item.helperContext,
-                    mode: .modification(confirmedPlan: item.analysisPlan ?? "")
-                ) { [weak self] message in
-                    Task { @MainActor in self?.append(message, to: item.id) }
-                }
-
-                setStage(.reviewing, for: item.id)
-                append("正在收集代码差异和修改文件", to: item.id)
-                let files = try await gitService.changedFiles(at: item.repositoryPath)
-                guard !files.isEmpty else {
-                    throw JobError.noChanges
-                }
-                let diff = try await gitService.diff(at: item.repositoryPath)
-                let report = PromptBuilder.parseReport(
-                    finalMessage: execution.finalMessage,
-                    rawOutput: execution.rawOutput,
-                    changedFiles: files,
-                    diff: diff
+                    mode: .modification(confirmedPlan: item.analysisPlan ?? ""),
+                    onStarted: { [weak self] execution in
+                        await self?.recordStartedExecution(execution, for: item.id)
+                    },
+                    onEvent: { [weak self] event in
+                        await self?.handle(event, for: item.id)
+                    }
                 )
-                updateItem(item.id) {
-                    $0.report = report
-                    $0.stage = .awaitingApproval
-                    $0.updatedAt = Date()
-                    $0.logs.append(JobLogEntry(message: "修改报告已生成，等待人工确认"))
-                }
+                try await completeModification(execution, for: item.id)
             } catch is CancellationError {
+                guard self.item(id: item.id)?.stage != .cancelled else {
+                    tasks[item.id] = nil
+                    return
+                }
                 setFailure("任务已取消", stage: .cancelled, for: item.id)
+            } catch DurableExecutionError.interrupted {
+                setInterrupted(for: item.id)
             } catch {
                 setFailure(error.localizedDescription, stage: .failed, for: item.id)
             }
@@ -106,24 +102,27 @@ final class JobCoordinator {
                 append("正在使用 \(item.provider.rawValue) 分析问题和生成修改方案", to: item.id)
 
                 let execution = try await aiService.run(
-                    itemID: item.id,
                     provider: item.provider,
                     ticket: ticket,
                     repositoryPath: repository.path,
                     helperContext: item.helperContext,
-                    mode: .analysis
-                ) { [weak self] message in
-                    Task { @MainActor in self?.append(message, to: item.id) }
-                }
-
-                updateItem(item.id) {
-                    $0.analysisPlan = execution.finalMessage
-                    $0.stage = .awaitingPlanApproval
-                    $0.updatedAt = Date()
-                    $0.logs.append(JobLogEntry(message: "分析与修改方案已生成，等待用户确认"))
-                }
+                    mode: .analysis,
+                    onStarted: { [weak self] execution in
+                        await self?.recordStartedExecution(execution, for: item.id)
+                    },
+                    onEvent: { [weak self] event in
+                        await self?.handle(event, for: item.id)
+                    }
+                )
+                completeAnalysis(execution, for: item.id)
             } catch is CancellationError {
+                guard self.item(id: item.id)?.stage != .cancelled else {
+                    tasks[item.id] = nil
+                    return
+                }
                 setFailure("任务已取消", stage: .cancelled, for: item.id)
+            } catch DurableExecutionError.interrupted {
+                setInterrupted(for: item.id)
             } catch {
                 setFailure(error.localizedDescription, stage: .failed, for: item.id)
             }
@@ -134,9 +133,78 @@ final class JobCoordinator {
     }
 
     func cancel(itemID: UUID) {
-        aiService.cancel(itemID: itemID)
+        if let execution = item(id: itemID)?.execution {
+            aiService.cancel(execution: execution)
+        }
         tasks[itemID]?.cancel()
         setFailure("用户取消了任务，未执行 commit、push 或工单更新", stage: .cancelled, for: itemID)
+    }
+
+    func recoverPersistedJobs() {
+        guard !didRecoverPersistedJobs else { return }
+        didRecoverPersistedJobs = true
+        let recoverableIDs = appState.workItems
+            .filter { $0.stage == .analyzing || $0.stage == .runningAI || $0.stage == .reviewing }
+            .map(\.id)
+        recoverableIDs.forEach { recover(itemID: $0) }
+    }
+
+    func recover(itemID: UUID) {
+        guard tasks[itemID] == nil, let currentItem = item(id: itemID) else { return }
+        guard let execution = currentItem.execution,
+              execution.phase == expectedPhase(for: currentItem.stage) || currentItem.stage == .interrupted else {
+            setInterrupted(for: itemID)
+            return
+        }
+
+        updateItem(itemID) {
+            $0.stage = execution.phase == .analysis ? .analyzing : .runningAI
+            $0.errorMessage = nil
+            $0.execution?.state = .reconnecting
+            $0.updatedAt = Date()
+        }
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                switch aiService.inspect(execution: execution) {
+                case .running:
+                    updateItem(itemID) {
+                        $0.execution?.state = .recovered
+                        $0.logs.append(JobLogEntry(message: "已恢复后台任务，正在继续接收日志"))
+                        $0.updatedAt = Date()
+                    }
+                case .completed:
+                    append("后台任务已完成，正在恢复执行结果", to: itemID)
+                case .interrupted:
+                    setInterrupted(for: itemID)
+                    tasks[itemID] = nil
+                    return
+                }
+
+                let result = try await aiService.resume(
+                    execution: execution,
+                    provider: currentItem.provider
+                ) { [weak self] event in
+                    await self?.handle(event, for: itemID)
+                }
+                if execution.phase == .analysis {
+                    completeAnalysis(result, for: itemID)
+                } else {
+                    try await completeModification(result, for: itemID)
+                }
+            } catch is CancellationError {
+                if self.item(id: itemID)?.stage != .cancelled {
+                    setFailure("任务已取消", stage: .cancelled, for: itemID)
+                }
+            } catch DurableExecutionError.interrupted {
+                setInterrupted(for: itemID)
+            } catch {
+                setFailure(error.localizedDescription, stage: .failed, for: itemID)
+            }
+            tasks[itemID] = nil
+        }
+        tasks[itemID] = task
     }
 
     func dismiss(itemID: UUID) {
@@ -244,6 +312,82 @@ final class JobCoordinator {
         appState.workItems.first { $0.id == id }
     }
 
+    private func expectedPhase(for stage: JobStage) -> AIExecutionPhase? {
+        switch stage {
+        case .analyzing: .analysis
+        case .runningAI, .reviewing: .modification
+        default: nil
+        }
+    }
+
+    private func recordStartedExecution(_ execution: AIExecutionRecord, for itemID: UUID) {
+        updateItem(itemID) {
+            var runningExecution = execution
+            runningExecution.state = .running
+            $0.execution = runningExecution
+            $0.errorMessage = nil
+            $0.updatedAt = Date()
+        }
+    }
+
+    private func handle(_ event: AIExecutionStreamEvent, for itemID: UUID) {
+        guard let message = event.displayMessage, !message.isEmpty else { return }
+        updateItem(itemID) {
+            $0.execution?.lastOutputOffset = event.byteOffset
+            if $0.execution?.state != .recovered {
+                $0.execution?.state = .running
+            }
+            $0.logs.append(JobLogEntry(message: message))
+            $0.updatedAt = Date()
+        }
+    }
+
+    private func completeAnalysis(_ execution: AIExecutionResult, for itemID: UUID) {
+        updateItem(itemID) {
+            $0.analysisPlan = execution.finalMessage
+            $0.stage = .awaitingPlanApproval
+            $0.execution?.state = .completed
+            $0.errorMessage = nil
+            $0.updatedAt = Date()
+            $0.logs.append(JobLogEntry(message: "分析与修改方案已生成，等待用户确认"))
+        }
+    }
+
+    private func completeModification(_ execution: AIExecutionResult, for itemID: UUID) async throws {
+        guard let currentItem = item(id: itemID) else { return }
+        setStage(.reviewing, for: itemID)
+        append("正在收集代码差异和修改文件", to: itemID)
+        let files = try await gitService.changedFiles(at: currentItem.repositoryPath)
+        guard !files.isEmpty else { throw JobError.noChanges }
+        let diff = try await gitService.diff(at: currentItem.repositoryPath)
+        let report = PromptBuilder.parseReport(
+            finalMessage: execution.finalMessage,
+            rawOutput: execution.rawOutput,
+            changedFiles: files,
+            diff: diff
+        )
+        updateItem(itemID) {
+            $0.report = report
+            $0.stage = .awaitingApproval
+            $0.execution?.state = .completed
+            $0.errorMessage = nil
+            $0.updatedAt = Date()
+            $0.logs.append(JobLogEntry(message: "修改报告已生成，等待人工确认"))
+        }
+    }
+
+    private func setInterrupted(for itemID: UUID) {
+        updateItem(itemID) {
+            $0.stage = .interrupted
+            $0.execution?.state = .interrupted
+            $0.errorMessage = "未检测到仍在运行的 AI 后台进程，也没有找到完整执行结果。"
+            $0.updatedAt = Date()
+            if $0.logs.last?.message != $0.errorMessage {
+                $0.logs.append(JobLogEntry(message: $0.errorMessage ?? "执行已中断", level: "error"))
+            }
+        }
+    }
+
     private func deliveryAssignee(for ticket: Ticket, manualAssignee: String) throws -> String {
         if ticket.kind == .feature {
             return ""
@@ -298,6 +442,11 @@ final class JobCoordinator {
     private func setFailure(_ message: String, stage: JobStage, for itemID: UUID) {
         updateItem(itemID) {
             $0.stage = stage
+            if stage == .cancelled {
+                $0.execution?.state = .interrupted
+            } else if stage == .failed {
+                $0.execution?.state = .completed
+            }
             $0.errorMessage = message
             $0.updatedAt = Date()
             $0.logs.append(JobLogEntry(message: message, level: "error"))

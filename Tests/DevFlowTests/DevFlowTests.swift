@@ -119,6 +119,150 @@ final class DevFlowTests: XCTestCase {
         XCTAssertEqual(report.risks, ["需要关注高并发场景"])
     }
 
+    func testLegacyWorkItemDecodesWithoutExecutionRecord() throws {
+        let item = WorkItem(
+            ticketID: 42,
+            provider: .codex,
+            repositoryPath: "/tmp/repository",
+            branch: "main",
+            helperContext: "",
+            stage: .analyzing,
+            logs: []
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(item)
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        XCTAssertNil(object?["execution"])
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(WorkItem.self, from: data)
+        XCTAssertNil(decoded.execution)
+    }
+
+    func testExecutionRecordPersistsWithWorkItem() throws {
+        let runID = UUID()
+        let execution = AIExecutionRecord(
+            runID: runID,
+            phase: .modification,
+            runDirectory: "/tmp/\(runID.uuidString)",
+            workerPID: 123,
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            lastOutputOffset: 48,
+            state: .recovered
+        )
+        let item = WorkItem(
+            ticketID: 42,
+            provider: .codex,
+            repositoryPath: "/tmp/repository",
+            branch: "main",
+            helperContext: "",
+            stage: .runningAI,
+            logs: [],
+            execution: execution
+        )
+        let data = try JSONEncoder().encode(item)
+        let decoded = try JSONDecoder().decode(WorkItem.self, from: data)
+        XCTAssertEqual(decoded.execution, execution)
+    }
+
+    func testDurableExecutionDetectsResultFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("devflow-result-\(UUID().uuidString)")
+        let runID = UUID()
+        let runDirectory = root.appendingPathComponent(runID.uuidString)
+        try FileManager.default.createDirectory(at: runDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = DurableExecutionFiles(runDirectory: runDirectory)
+        try files.writeJSON(
+            DurableExecutionResultFile(runID: runID, exitCode: 0, endedAt: Date(), launchError: nil),
+            to: files.resultURL
+        )
+        let execution = AIExecutionRecord(
+            runID: runID,
+            phase: .analysis,
+            runDirectory: runDirectory.path,
+            workerPID: 999_999,
+            startedAt: Date(),
+            lastOutputOffset: 0,
+            state: .running
+        )
+        XCTAssertEqual(DurableProcessRunner().inspect(execution: execution), .completed)
+    }
+
+    func testDurableWorkerWritesOutputHeartbeatAndResult() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("devflow-worker-\(UUID().uuidString)")
+        let runID = UUID()
+        let runDirectory = root.appendingPathComponent(runID.uuidString)
+        try FileManager.default.createDirectory(at: runDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = DurableExecutionFiles(runDirectory: runDirectory)
+        try files.writeJSON(
+            DurableWorkerConfiguration(
+                runID: runID,
+                executable: "/bin/sh",
+                arguments: ["-c", "printf 'worker-line\\n'"],
+                workingDirectory: runDirectory.path,
+                environment: [:]
+            ),
+            to: files.configurationURL
+        )
+
+        XCTAssertEqual(DurableExecutionWorker.run(configurationPath: files.configurationURL.path), 0)
+        XCTAssertEqual(try String(contentsOf: files.standardOutputURL, encoding: .utf8), "worker-line\n")
+        XCTAssertEqual(files.readJSON(DurableExecutionHeartbeat.self, from: files.heartbeatURL)?.runID, runID)
+        XCTAssertEqual(files.readJSON(DurableExecutionResultFile.self, from: files.resultURL)?.exitCode, 0)
+    }
+
+    func testHeartbeatFreshnessClassification() {
+        let now = Date()
+        XCTAssertEqual(
+            DurableProcessRunner.classify(
+                resultExists: false,
+                workerIsAlive: true,
+                heartbeatDate: now.addingTimeInterval(-2),
+                startedAt: now.addingTimeInterval(-30),
+                now: now
+            ),
+            .running
+        )
+        XCTAssertEqual(
+            DurableProcessRunner.classify(
+                resultExists: false,
+                workerIsAlive: true,
+                heartbeatDate: now.addingTimeInterval(-20),
+                startedAt: now.addingTimeInterval(-30),
+                now: now
+            ),
+            .interrupted
+        )
+        XCTAssertEqual(
+            DurableProcessRunner.classify(
+                resultExists: false,
+                workerIsAlive: false,
+                heartbeatDate: now,
+                startedAt: now,
+                now: now
+            ),
+            .interrupted
+        )
+    }
+
+    func testDurableLogReadsContinueFromByteOffsetWithoutDuplication() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("devflow-log-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try "first\nsecond\n".write(to: file, atomically: true, encoding: .utf8)
+        let first = try DurableProcessRunner.readLines(at: file, from: 0, includePartial: false)
+        XCTAssertEqual(first.lines, ["first", "second"])
+
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("third\n".utf8))
+        try handle.close()
+        let resumed = try DurableProcessRunner.readLines(at: file, from: first.nextOffset, includePartial: false)
+        XCTAssertEqual(resumed.lines, ["third"])
+    }
+
     func testGitServiceBlocksDirtyWorkspaceAndDetectsPullConflict() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("devflow-git-\(UUID().uuidString)")
         let remote = root.appendingPathComponent("remote.git")

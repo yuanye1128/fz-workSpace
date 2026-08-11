@@ -1,9 +1,17 @@
 import AppKit
+import Darwin
 import SwiftUI
 
 @main
 struct DevFlowApp: App {
-    @StateObject private var appState = AppState()
+    @StateObject private var appState: AppState
+
+    init() {
+        if let configurationPath = DurableExecutionWorker.configurationPath(from: CommandLine.arguments) {
+            Darwin.exit(DurableExecutionWorker.run(configurationPath: configurationPath))
+        }
+        _appState = StateObject(wrappedValue: AppState())
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -15,6 +23,7 @@ struct DevFlowApp: App {
                 .onAppear {
                     NSWindow.allowsAutomaticWindowTabbing = false
                     appState.applyAppearance()
+                    appState.jobCoordinator.recoverPersistedJobs()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     let state = appState

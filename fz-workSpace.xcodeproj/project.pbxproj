@@ -12,6 +12,7 @@
 		1A9EE838BDFF7E77E2D3DED6 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B6B59C8BC7CD64433CBD38A /* Theme.swift */; };
 		23AD576EDB8F77012E2C39EF /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54E5B362D4E58A30EB7ACC6E /* RootView.swift */; };
 		37EB51FED3B25B460B9F5078 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B168BD4F14D8CA25B5D4379E /* SettingsView.swift */; };
+		3E4D64A61D8763C248B06241 /* DurableExecution.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75B6ED4D742436D0DB39A518 /* DurableExecution.swift */; };
 		56C3D3137C7FD0BC38211B49 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C417DF30A9A9E7D2B924568B /* AppState.swift */; };
 		5A55833C2E8267AEB500E5D2 /* TicketCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585A8EE717817A61D5E7ED81 /* TicketCardView.swift */; };
 		5B98F78A2803AAFB7BEEF0A5 /* RepositoryConfigView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93DD63190C31D4F713D16167 /* RepositoryConfigView.swift */; };
@@ -45,6 +46,7 @@
 		54E5B362D4E58A30EB7ACC6E /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		585A8EE717817A61D5E7ED81 /* TicketCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TicketCardView.swift; sourceTree = "<group>"; };
 		62E09025CAEDAFCFD4B8CF17 /* AIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIService.swift; sourceTree = "<group>"; };
+		75B6ED4D742436D0DB39A518 /* DurableExecution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DurableExecution.swift; sourceTree = "<group>"; };
 		850CF8C2B758925F611A0C2C /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		8E461DEF914920E56A5734EA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		93DD63190C31D4F713D16167 /* RepositoryConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryConfigView.swift; sourceTree = "<group>"; };
@@ -75,6 +77,7 @@
 			isa = PBXGroup;
 			children = (
 				62E09025CAEDAFCFD4B8CF17 /* AIService.swift */,
+				75B6ED4D742436D0DB39A518 /* DurableExecution.swift */,
 				236459CD27774F81CD0F1B70 /* GitService.swift */,
 				46A71C56A1967CB47D52A9F7 /* JobCoordinator.swift */,
 				388FD5D91F9BED680601D214 /* KnowledgeBaseSession.swift */,
@@ -206,6 +209,7 @@
 				56C3D3137C7FD0BC38211B49 /* AppState.swift in Sources */,
 				CB55E94BE025D0AB9932FA11 /* Components.swift in Sources */,
 				051F8ACA27B67C9CD41B300C /* DevFlowApp.swift in Sources */,
+				3E4D64A61D8763C248B06241 /* DurableExecution.swift in Sources */,
 				B960305D1FC39DD5067D3542 /* GitService.swift in Sources */,
 				BCC3E5FEEC7BA657051822A9 /* JobCoordinator.swift in Sources */,
 				FB31103CC57A046E52787E64 /* KnowledgeBaseSession.swift in Sources */,

@@ -465,17 +465,17 @@ private struct WorkItemContent: View {
     private var progressContent: some View {
         VStack(spacing: 20) {
             HStack(spacing: 16) {
-                if item.stage == .failed {
+                if item.stage == .failed || item.stage == .interrupted {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 27))
-                        .foregroundStyle(DevFlowTheme.danger)
+                        .foregroundStyle(item.stage == .interrupted ? DevFlowTheme.warning : DevFlowTheme.danger)
                 } else {
                     ProgressView().controlSize(.large)
                 }
                 VStack(alignment: .leading, spacing: 5) {
                     Text(item.stage.rawValue)
                         .font(.system(size: 18, weight: .semibold))
-                    Text(item.errorMessage ?? "\(item.provider.rawValue) 正在处理 \(ticket.issueNumber)，你可以在此查看实时进度。")
+                    Text(progressMessage)
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                 }
@@ -521,14 +521,23 @@ private struct WorkItemContent: View {
             }
 
             HStack {
-                if item.stage == .failed {
+                if item.stage == .interrupted {
+                    Button("返回配置") {
+                        appState.jobCoordinator.dismiss(itemID: item.id)
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    Button("重新检查进程") {
+                        appState.jobCoordinator.recover(itemID: item.id)
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                } else if item.stage == .failed {
                     Button("返回配置") {
                         appState.jobCoordinator.dismiss(itemID: item.id)
                     }
                     .buttonStyle(SecondaryButtonStyle())
                 }
                 Spacer()
-                if ![.failed, .completed].contains(item.stage) {
+                if ![.failed, .interrupted, .completed].contains(item.stage) {
                     Button("取消任务", role: .destructive) {
                         appState.jobCoordinator.cancel(itemID: item.id)
                     }
@@ -537,6 +546,20 @@ private struct WorkItemContent: View {
             }
         }
         .padding(25)
+    }
+
+    private var progressMessage: String {
+        if item.stage == .interrupted {
+            return item.errorMessage ?? "AI 后台任务已中断，你可以重新检查进程或返回配置。"
+        }
+        switch item.execution?.state {
+        case .reconnecting:
+            return "正在重新连接 AI 任务…"
+        case .recovered:
+            return "已恢复后台任务，正在继续接收日志"
+        default:
+            return item.errorMessage ?? "\(item.provider.rawValue) 正在处理 \(ticket.issueNumber)，你可以在此查看实时进度。"
+        }
     }
 }
 
@@ -613,7 +636,7 @@ struct JobStageStrip: View {
     private let steps = [
         WorkflowStep(title: "分析", symbol: "magnifyingglass"),
         WorkflowStep(title: "确认方案", symbol: "person.badge.shield.checkmark"),
-        WorkflowStep(title: "AI 修改", symbol: "wand.and.stars"),
+        WorkflowStep(title: "AI 编码", symbol: "wand.and.stars"),
         WorkflowStep(title: "报告确认", symbol: "doc.text.magnifyingglass"),
         WorkflowStep(title: "代码提交", symbol: "arrow.up.circle"),
         WorkflowStep(title: "待测试", symbol: "checkmark.seal")
@@ -656,7 +679,7 @@ struct JobStageStrip: View {
         case .reviewing, .awaitingApproval: 3
         case .committing, .pulling, .pushing, .partial: 4
         case .updatingTicket, .completed: 5
-        case .preparing, .failed, .cancelled: nil
+        case .preparing, .interrupted, .failed, .cancelled: nil
         }
     }
 

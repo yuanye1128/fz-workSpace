@@ -194,7 +194,7 @@ enum JobStage: String, Codable, CaseIterable {
     case preparing = "准备仓库"
     case analyzing = "AI 分析问题"
     case awaitingPlanApproval = "确认修改方案"
-    case runningAI = "AI 修改代码"
+    case runningAI = "AI 开始编码"
     case reviewing = "查看报告"
     case awaitingApproval = "人工确认"
     case committing = "本地 Commit"
@@ -203,6 +203,7 @@ enum JobStage: String, Codable, CaseIterable {
     case updatingTicket = "转为待测试"
     case completed = "已完成"
     case partial = "部分完成"
+    case interrupted = "执行已中断"
     case failed = "失败"
     case cancelled = "已取消"
 
@@ -210,6 +211,30 @@ enum JobStage: String, Codable, CaseIterable {
         self == .awaitingPlanApproval || self == .awaitingApproval
     }
 
+}
+
+enum AIExecutionPhase: String, Codable, Equatable, Sendable {
+    case analysis
+    case modification
+}
+
+enum AIExecutionState: String, Codable, Equatable, Sendable {
+    case launching
+    case running
+    case reconnecting
+    case recovered
+    case completed
+    case interrupted
+}
+
+struct AIExecutionRecord: Codable, Equatable, Sendable {
+    var runID: UUID
+    var phase: AIExecutionPhase
+    var runDirectory: String
+    var workerPID: Int32
+    var startedAt: Date
+    var lastOutputOffset: Int64
+    var state: AIExecutionState
 }
 
 struct AIReport: Codable, Equatable {
@@ -242,6 +267,7 @@ struct WorkItem: Identifiable, Codable, Equatable {
     var report: AIReport?
     var commitHash: String?
     var errorMessage: String?
+    var execution: AIExecutionRecord? = nil
     var createdAt = Date()
     var updatedAt = Date()
 }
