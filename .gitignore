@@ -1,0 +1,10 @@
+.build/
+Build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.DS_Store
+qa-main-*.png
+qa-modal-*.png
+qa-settings-*.png
+qa/
