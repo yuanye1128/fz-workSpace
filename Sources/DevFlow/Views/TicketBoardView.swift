@@ -131,14 +131,14 @@ struct TicketBoardView: View {
                     }
                 } label: {
                     HStack(spacing: 7) {
-                        Image(systemName: appState.needsLogin ? "person.crop.circle.badge.plus" : "arrow.clockwise")
-                            .rotationEffect(.degrees(appState.isSynchronizing && !appState.needsLogin ? 360 : 0))
-                            .animation(
-                                appState.isSynchronizing && !appState.needsLogin
-                                    ? .linear(duration: 0.8).repeatForever(autoreverses: false)
-                                    : .default,
-                                value: appState.isSynchronizing
-                            )
+                        if appState.isSynchronizing && !appState.needsLogin {
+                            ProgressView()
+                                .controlSize(.small)
+                                .frame(width: 14, height: 14)
+                        } else {
+                            Image(systemName: appState.needsLogin ? "person.crop.circle.badge.plus" : "arrow.clockwise")
+                                .frame(width: 14, height: 14)
+                        }
                         Text(appState.needsLogin ? "去登录" : "刷新")
                     }
                 }

@@ -13,7 +13,12 @@ struct RootView: View {
                     .frame(minWidth: 250, idealWidth: 250, maxWidth: 250, maxHeight: .infinity, alignment: .topLeading)
                     .layoutPriority(2)
 
-                Divider()
+                Rectangle()
+                    .fill(DevFlowTheme.sidebarSeparator(colorScheme))
+                    .frame(width: 1)
+                    .shadow(color: DevFlowTheme.sidebarShadow(colorScheme), radius: 7, x: 3, y: 0)
+                    .zIndex(2)
+                    .allowsHitTesting(false)
 
                 Group {
                     switch appState.destination {
@@ -39,6 +44,7 @@ struct RootView: View {
         .animation(.easeOut(duration: 0.18), value: appState.showingTicketModal)
         .onAppear {
             guard escapeKeyMonitor == nil else { return }
+            configureWindowBackdrop()
             escapeKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                 guard event.keyCode == 53, appState.showingTicketModal else { return event }
                 appState.requestTicketModalClose()
@@ -59,6 +65,15 @@ struct RootView: View {
         .task {
             await appState.restoreSessionIfNeeded()
             await appState.runAutomaticSyncLoop()
+        }
+    }
+
+    private func configureWindowBackdrop() {
+        DispatchQueue.main.async {
+            guard let window = NSApp.keyWindow ?? NSApp.windows.first(where: \.isVisible) else { return }
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.titlebarAppearsTransparent = true
         }
     }
 

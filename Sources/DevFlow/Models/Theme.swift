@@ -12,7 +12,17 @@ enum DevFlowTheme {
     }
 
     static func sidebar(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(red: 0.075, green: 0.086, blue: 0.106) : Color(red: 0.965, green: 0.973, blue: 0.988)
+        scheme == .dark
+            ? Color(red: 0.075, green: 0.086, blue: 0.106).opacity(0.36)
+            : Color(red: 0.925, green: 0.94, blue: 0.965).opacity(0.18)
+    }
+
+    static func sidebarSeparator(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color.white.opacity(0.085) : Color.white.opacity(0.72)
+    }
+
+    static func sidebarShadow(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color.black.opacity(0.34) : Color.black.opacity(0.10)
     }
 
     static func surface(_ scheme: ColorScheme) -> Color {

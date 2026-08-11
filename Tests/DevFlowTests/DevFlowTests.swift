@@ -42,6 +42,34 @@ final class DevFlowTests: XCTestCase {
         XCTAssertTrue(state.showingNewTicketsPopover)
     }
 
+    @MainActor
+    func testTicketSyncRetainsCachedTicketWithActiveWorkItem() {
+        let state = AppState()
+        let activeTicket = SampleData.tickets[0]
+        let staleTicket = SampleData.tickets[1]
+        let syncedTicket = SampleData.tickets[4]
+        state.tickets = [activeTicket, staleTicket]
+        state.workItems = [
+            WorkItem(
+                ticketID: activeTicket.id,
+                provider: .codex,
+                repositoryPath: "/tmp/repository",
+                branch: "main",
+                helperContext: "",
+                stage: .runningAI,
+                logs: []
+            )
+        ]
+
+        let merged = state.mergedTicketsPreservingActiveWork([syncedTicket])
+        state.tickets = merged
+        state.destination = .processing
+
+        XCTAssertEqual(Set(merged.map(\.id)), Set([syncedTicket.id, activeTicket.id]))
+        XCTAssertEqual(state.filteredTickets.map(\.id), [activeTicket.id])
+        XCTAssertFalse(merged.contains(where: { $0.id == staleTicket.id }))
+    }
+
     func testKnowledgeBaseQueryRemovesSinglePageAndMigratesLegacyDefault() {
         let paged = "https://kb.fzyun.net/issues?assigned_to_id=424&page=3&set_filter=1&sort=priority%3Adesc%2Cupdated_on%3Adesc"
         let allPages = KnowledgeBaseQuery.allPagesURL(paged)

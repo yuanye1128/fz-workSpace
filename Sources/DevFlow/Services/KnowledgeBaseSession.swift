@@ -71,12 +71,8 @@ final class KnowledgeBaseSessionController: NSObject, ObservableObject, WKNaviga
                 throw KnowledgeBaseError.parseFailed(error)
             }
             let tickets = response.tickets.map { $0.ticket }
-            let projectNames = Array(Set(response.tickets.map(\.project))).sorted()
             let existingTicketIDs = Set(appState.tickets.map(\.id))
             let newlyDiscoveredTickets = tickets.filter { !existingTicketIDs.contains($0.id) }
-            appState.projects = projectNames.map { name in
-                Project(id: name, name: name, symbol: symbol(for: name))
-            }
             await persistCookies(using: appState.persistence)
             appState.updateTickets(tickets, newlyDiscoveredTickets: newlyDiscoveredTickets)
             statusMessage = "已读取 \(response.pageCount) 页，共同步 \(tickets.count) 个工单"
@@ -321,12 +317,6 @@ final class KnowledgeBaseSessionController: NSObject, ObservableObject, WKNaviga
         return value as? Bool ?? false
     }
 
-    private func symbol(for project: String) -> String {
-        if project.contains("移动") { return "iphone" }
-        if project.contains("数据") { return "server.rack" }
-        if project.contains("云") { return "cube" }
-        return "square.grid.2x2"
-    }
 }
 
 private struct KBResponse: Decodable {

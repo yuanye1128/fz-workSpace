@@ -302,9 +302,11 @@ final class AppState: ObservableObject {
 
     func updateTickets(_ newTickets: [Ticket], newlyDiscoveredTickets: [Ticket] = []) {
         let selectedTicketID = selectedTicket?.id
-        tickets = newTickets
+        let mergedTickets = mergedTicketsPreservingActiveWork(newTickets)
+        tickets = mergedTickets
+        projects = Self.rebuildProjects(from: mergedTickets)
         if let selectedTicketID {
-            selectedTicket = newTickets.first(where: { $0.id == selectedTicketID })
+            selectedTicket = mergedTickets.first(where: { $0.id == selectedTicketID })
         }
         hasAuthenticatedSession = true
         syncStatus = .synced(Date())
@@ -313,6 +315,14 @@ final class AppState: ObservableObject {
             hasUnreadNewTickets = true
         }
         persistState()
+    }
+
+    func mergedTicketsPreservingActiveWork(_ syncedTickets: [Ticket]) -> [Ticket] {
+        let syncedTicketIDs = Set(syncedTickets.map(\.id))
+        let retainedTickets = tickets.filter { ticket in
+            !syncedTicketIDs.contains(ticket.id) && activeWorkItem(for: ticket.id) != nil
+        }
+        return syncedTickets + retainedTickets
     }
 
     func markLoginRequired() {

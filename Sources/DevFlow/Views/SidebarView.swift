@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SidebarView: View {
@@ -52,7 +53,13 @@ struct SidebarView: View {
             .padding(.horizontal, 10)
             .padding(.bottom, 18)
         }
-        .background(DevFlowTheme.sidebar(colorScheme))
+        .background {
+            ZStack {
+                SidebarVisualEffectView()
+                Rectangle().fill(DevFlowTheme.sidebar(colorScheme))
+            }
+            .ignoresSafeArea()
+        }
     }
 
     private var brand: some View {
@@ -92,14 +99,6 @@ struct SidebarView: View {
             .padding(.horizontal, 14)
             .frame(height: 43)
             .background(selected ? DevFlowTheme.selectedFill(colorScheme) : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .overlay(alignment: .leading) {
-                if selected {
-                    Capsule()
-                        .fill(DevFlowTheme.accent)
-                        .frame(width: 3, height: 24)
-                        .offset(x: -1)
-                }
-            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -111,9 +110,6 @@ struct SidebarView: View {
             appState.select(project: project)
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: project.symbol)
-                    .font(.system(size: 16, weight: .medium))
-                    .frame(width: 20)
                 Text(project.name)
                     .font(.system(size: 14, weight: selected ? .semibold : .medium))
                     .lineLimit(1)
@@ -128,6 +124,19 @@ struct SidebarView: View {
         }
         .buttonStyle(.plain)
     }
+}
+
+private struct SidebarVisualEffectView: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.blendingMode = .behindWindow
+        view.state = .active
+        view.isEmphasized = false
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
 private struct CountBadge: View {
