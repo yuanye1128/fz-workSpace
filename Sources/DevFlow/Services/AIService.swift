@@ -5,6 +5,16 @@ struct AIExecutionResult: Sendable {
     var rawOutput: String
 }
 
+enum AIExecutionMode: Sendable {
+    case analysis
+    case modification(confirmedPlan: String)
+
+    var isAnalysis: Bool {
+        if case .analysis = self { return true }
+        return false
+    }
+}
+
 final class AIService: @unchecked Sendable {
     private let runner: ProcessRunner
 
@@ -18,9 +28,16 @@ final class AIService: @unchecked Sendable {
         ticket: Ticket,
         repositoryPath: String,
         helperContext: String,
+        mode: AIExecutionMode,
         onEvent: @escaping @Sendable (String) -> Void
     ) async throws -> AIExecutionResult {
-        let prompt = PromptBuilder.build(ticket: ticket, helperContext: helperContext)
+        let prompt: String
+        switch mode {
+        case .analysis:
+            prompt = PromptBuilder.buildAnalysis(ticket: ticket, helperContext: helperContext)
+        case let .modification(confirmedPlan):
+            prompt = PromptBuilder.build(ticket: ticket, helperContext: helperContext, confirmedPlan: confirmedPlan)
+        }
         let command: String
         let arguments: [String]
 
@@ -30,7 +47,7 @@ final class AIService: @unchecked Sendable {
             arguments = [
                 "exec",
                 "--json",
-                "--sandbox", "workspace-write",
+                "--sandbox", mode.isAnalysis ? "read-only" : "workspace-write",
                 "--color", "never",
                 "-C", repositoryPath,
                 prompt
@@ -100,8 +117,8 @@ final class AIService: @unchecked Sendable {
                let text = content.first?["text"] as? String {
                 return (text, nil)
             }
-            if type == "tool_call", let subtype = json["subtype"] as? String {
-                return (subtype == "started" ? "Cursor 正在调用工具" : "Cursor 工具执行完成", nil)
+            if type == "tool_call" {
+                return (nil, nil)
             }
             if type == "result", let result = json["result"] as? String {
                 return ("Cursor 已完成", result)
@@ -118,9 +135,8 @@ final class AIService: @unchecked Sendable {
                     if let text = blocks.first(where: { ($0["type"] as? String) == "text" })?["text"] as? String, !text.isEmpty {
                         return (text, nil)
                     }
-                    if let tool = blocks.first(where: { ($0["type"] as? String) == "tool_use" }),
-                       let name = tool["name"] as? String {
-                        return ("Claude Code 正在调用工具：\(name)", nil)
+                    if blocks.contains(where: { ($0["type"] as? String) == "tool_use" }) {
+                        return (nil, nil)
                     }
                 }
             }
@@ -140,8 +156,8 @@ final class AIService: @unchecked Sendable {
                let text = item["text"] as? String {
                 return (text, text)
             }
-            if type == "item.started", let item = json["item"] as? [String: Any], let itemType = item["type"] as? String {
-                return ("Codex 正在执行：\(itemType)", nil)
+            if type == "item.started" {
+                return (nil, nil)
             }
             if type == "turn.completed" { return ("Codex 已完成本轮任务", nil) }
             if let message = json["message"] as? String { return (message, nil) }
@@ -151,9 +167,9 @@ final class AIService: @unchecked Sendable {
 }
 
 enum PromptBuilder {
-    static func build(ticket: Ticket, helperContext: String) -> String {
+    static func buildAnalysis(ticket: Ticket, helperContext: String) -> String {
         """
-        你正在通过 DevFlow 工作台解决公司工单。请直接在当前 Git 仓库中定位并修复问题。
+        你正在通过 DevFlow 工作台分析公司工单。当前处于只读分析阶段，绝对不要修改、创建或删除任何文件，也不要执行会写入仓库的命令。
 
         工单编号：\(ticket.issueNumber)
         项目：\(ticket.projectName)
@@ -165,6 +181,42 @@ enum PromptBuilder {
 
         用户提供的辅助定位信息：
         \(helperContext.isEmpty ? "未提供，请自行在仓库中定位。" : helperContext)
+
+        工作要求：
+        1. 阅读仓库规则和相关实现，定位问题根因。
+        2. 给出聚焦的修改方案，明确涉及的文件、修改步骤和验证方式。
+        3. 说明潜在影响和需要人工关注的风险。
+        4. 不要执行 git commit、git pull、git push，也不要修改知识库工单。
+        5. 最终回复必须使用以下固定段落：
+
+        DEVFLOW_ROOT_CAUSE:
+        说明问题根因。
+
+        DEVFLOW_PLAN:
+        1. 列出建议的修改步骤、涉及文件和验证方式。
+
+        DEVFLOW_RISKS:
+        - 列出潜在影响和人工检查项；没有时写“未发现明显额外风险”。
+        """
+    }
+
+    static func build(ticket: Ticket, helperContext: String, confirmedPlan: String = "") -> String {
+        """
+        你正在通过 DevFlow 工作台解决公司工单。用户已确认修改方案，请按方案在当前 Git 仓库中修改代码。
+
+        工单编号：\(ticket.issueNumber)
+        项目：\(ticket.projectName)
+        类型：\(ticket.kind.rawValue)
+        优先级：\(ticket.priority.rawValue)
+        标题：\(ticket.title)
+        描述：
+        \(ticket.displayDescription)
+
+        用户提供的辅助定位信息：
+        \(helperContext.isEmpty ? "未提供，请自行在仓库中定位。" : helperContext)
+
+        用户已确认的分析与修改方案：
+        \(confirmedPlan.isEmpty ? "未提供，请基于工单重新确认最小修改范围。" : confirmedPlan)
 
         工作要求：
         1. 先检查仓库规则和相关实现，定位根因后再修改。

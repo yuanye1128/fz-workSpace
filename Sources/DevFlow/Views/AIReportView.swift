@@ -35,6 +35,15 @@ struct AIReportView: View {
 
             Divider()
 
+            VStack(alignment: .leading, spacing: 8) {
+                SectionLabel(title: "AI 解决流程")
+                JobStageStrip(current: item.stage)
+            }
+            .padding(.horizontal, 25)
+            .padding(.vertical, 13)
+
+            Divider()
+
             Group {
                 switch selectedTab {
                 case .summary: summaryView

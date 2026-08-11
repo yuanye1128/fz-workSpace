@@ -192,6 +192,8 @@ struct TicketFilters: Equatable {
 
 enum JobStage: String, Codable, CaseIterable {
     case preparing = "准备仓库"
+    case analyzing = "AI 分析问题"
+    case awaitingPlanApproval = "确认修改方案"
     case runningAI = "AI 修改代码"
     case reviewing = "查看报告"
     case awaitingApproval = "人工确认"
@@ -203,6 +205,11 @@ enum JobStage: String, Codable, CaseIterable {
     case partial = "部分完成"
     case failed = "失败"
     case cancelled = "已取消"
+
+    var requiresUserApproval: Bool {
+        self == .awaitingPlanApproval || self == .awaitingApproval
+    }
+
 }
 
 struct AIReport: Codable, Equatable {
@@ -231,6 +238,7 @@ struct WorkItem: Identifiable, Codable, Equatable {
     var helperContext: String
     var stage: JobStage
     var logs: [JobLogEntry]
+    var analysisPlan: String?
     var report: AIReport?
     var commitHash: String?
     var errorMessage: String?

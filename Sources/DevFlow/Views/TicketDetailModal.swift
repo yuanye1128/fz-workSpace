@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct TicketDetailModal: View {
     @EnvironmentObject private var appState: AppState
@@ -9,6 +10,7 @@ struct TicketDetailModal: View {
     @State private var provider: AIProvider = .codex
     @State private var helperContext = ""
     @State private var showingCloseConfirmation = false
+    @State private var isDroppingHelperFiles = false
     @FocusState private var focusedField: Field?
 
     let ticket: Ticket
@@ -40,9 +42,7 @@ struct TicketDetailModal: View {
     }
 
     private var requiresCloseConfirmation: Bool {
-        if isShowingConfiguration && hasUnsavedInput { return true }
-        guard let workItem else { return false }
-        return ![.cancelled, .completed, .failed].contains(workItem.stage)
+        isShowingConfiguration && hasUnsavedInput
     }
 
     private var closeConfirmationMessage: String {
@@ -57,10 +57,10 @@ struct TicketDetailModal: View {
             header
             Divider()
 
-            if isTestingTicket {
-                testingDetailContent
-            } else if let workItem, workItem.stage != .cancelled {
+            if let workItem, workItem.stage != .cancelled {
                 WorkItemContent(ticket: ticket, item: workItem)
+            } else if isTestingTicket {
+                testingDetailContent
             } else {
                 configurationContent
             }
@@ -82,7 +82,7 @@ struct TicketDetailModal: View {
     }
 
     private var headerStatus: TicketStatus {
-        if let item = appState.activeWorkItem(for: ticket.id), item.stage != .awaitingApproval {
+        if let item = appState.activeWorkItem(for: ticket.id), !item.stage.requiresUserApproval {
             return .processing
         }
         return ticket.status
@@ -284,40 +284,50 @@ struct TicketDetailModal: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("可选")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(DevFlowTheme.accent)
-                    .padding(.horizontal, 8)
-                    .frame(height: 22)
-                    .background(DevFlowTheme.accent.opacity(0.12), in: Capsule())
-            }
-            ZStack(alignment: .topLeading) {
-                TextEditor(text: $helperContext)
-                    .font(.system(size: 14))
-                    .scrollContentBackground(.hidden)
-                    .padding(10)
-                    .focused($focusedField, equals: .helper)
-                    .onChange(of: helperContext) { value in
-                        if value.count > 300 { helperContext = String(value.prefix(300)) }
+                HStack(spacing: 8) {
+                    Button {
+                        selectHelperFolder()
+                    } label: {
+                        Label("选择文件夹", systemImage: "folder")
                     }
-                if helperContext.isEmpty {
-                    Text("例如：该功能位于用户管理模块，重点检查 lib/user/profile 目录")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary.opacity(0.72))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 16)
-                        .allowsHitTesting(false)
+                    .buttonStyle(CardActionButtonStyle())
+
+                    Text("可选")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(DevFlowTheme.accent)
+                        .padding(.horizontal, 8)
+                        .frame(height: 22)
+                        .background(DevFlowTheme.accent.opacity(0.12), in: Capsule())
                 }
+            }
+            PathDropTextEditor(
+                text: $helperContext,
+                isFocused: Binding(
+                    get: { focusedField == .helper },
+                    set: { focusedField = $0 ? .helper : nil }
+                ),
+                isDropTargeted: $isDroppingHelperFiles,
+                placeholder: "例如：该功能位于用户管理模块，重点检查 lib/user/profile 目录"
+            )
+            .onChange(of: helperContext) { value in
+                if value.count > 500 { helperContext = String(value.prefix(500)) }
+            }
+            .onDrop(of: [UTType.fileURL], isTargeted: $isDroppingHelperFiles) { providers in
+                receiveDroppedHelperPaths(from: providers)
             }
             .frame(minHeight: 168)
             .background(DevFlowTheme.accent.opacity(colorScheme == .dark ? 0.10 : 0.05), in: RoundedRectangle(cornerRadius: 10))
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke(focusedField == .helper ? DevFlowTheme.accent : DevFlowTheme.accent.opacity(0.35), lineWidth: focusedField == .helper ? 2 : 1)
+                    .stroke(
+                        isDroppingHelperFiles || focusedField == .helper ? DevFlowTheme.accent : DevFlowTheme.accent.opacity(0.35),
+                        lineWidth: isDroppingHelperFiles || focusedField == .helper ? 2 : 1
+                    )
+                    .allowsHitTesting(false)
             )
             HStack {
                 Spacer()
-                Text("\(helperContext.count)/300")
+                Text("\(helperContext.count)/500")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
@@ -325,6 +335,37 @@ struct TicketDetailModal: View {
         .padding(14)
         .background(DevFlowTheme.accent.opacity(colorScheme == .dark ? 0.08 : 0.04), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(DevFlowTheme.accent.opacity(0.22)))
+    }
+
+    private func receiveDroppedHelperPaths(from providers: [NSItemProvider]) -> Bool {
+        guard !providers.isEmpty else { return false }
+        for provider in providers {
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url, url.isFileURL else { return }
+                DispatchQueue.main.async {
+                    appendHelperPath(url.standardizedFileURL.path)
+                }
+            }
+        }
+        return true
+    }
+
+    private func selectHelperFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "选择本地文件夹"
+        panel.message = "选择需要提供给 AI 定位的文件夹"
+        panel.prompt = "选择"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            appendHelperPath(url.standardizedFileURL.path)
+        }
+    }
+
+    private func appendHelperPath(_ path: String) {
+        helperContext = helperContext.isEmpty ? path : "\(helperContext)\n\(path)"
     }
 
     private var actionButtons: some View {
@@ -361,23 +402,7 @@ struct TicketDetailModal: View {
     private var workflowStrip: some View {
         VStack(alignment: .leading, spacing: 11) {
             SectionLabel(title: "AI 解决流程")
-            HStack(spacing: 4) {
-                ForEach(Array(["AI 修改", "查看报告", "人工确认", "Commit", "拉取", "Push", "待测试"].enumerated()), id: \.offset) { index, title in
-                    VStack(spacing: 5) {
-                        Image(systemName: ["wand.and.stars", "doc.text.magnifyingglass", "person.badge.shield.checkmark", "tray.and.arrow.down", "arrow.down.circle", "arrow.up.circle", "checkmark.seal"][index])
-                            .font(.system(size: 11))
-                        Text(title)
-                            .font(.system(size: 8.5, weight: .medium))
-                            .lineLimit(1)
-                    }
-                    .foregroundStyle(index == 0 ? DevFlowTheme.accent : .secondary)
-                    if index < 6 {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 7, weight: .bold))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            }
+            JobStageStrip(current: .preparing)
         }
         .padding(.top, 5)
     }
@@ -417,9 +442,19 @@ private struct WorkItemContent: View {
     let ticket: Ticket
     let item: WorkItem
 
+    private var visibleLogs: [JobLogEntry] {
+        item.logs.filter { entry in
+            !entry.message.contains("正在调用工具")
+                && !entry.message.contains("工具执行完成")
+                && !entry.message.hasPrefix("Codex 正在执行：")
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            if let report = item.report, [.awaitingApproval, .reviewing, .partial, .completed].contains(item.stage) {
+            if item.stage == .awaitingPlanApproval, let analysisPlan = item.analysisPlan {
+                AIAnalysisPlanView(ticket: ticket, item: item, plan: analysisPlan)
+            } else if let report = item.report, [.awaitingApproval, .reviewing, .partial, .completed].contains(item.stage) {
                 AIReportView(ticket: ticket, item: item, report: report)
             } else {
                 progressContent
@@ -451,21 +486,34 @@ private struct WorkItemContent: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 SectionLabel(title: "执行日志")
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 7) {
-                        ForEach(item.logs) { entry in
-                            HStack(alignment: .top, spacing: 9) {
-                                Text(entry.timestamp.formatted(date: .omitted, time: .standard))
-                                    .foregroundStyle(.secondary)
-                                Text(entry.message)
-                                    .foregroundStyle(entry.level == "error" ? DevFlowTheme.danger : .primary)
-                                Spacer()
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 7) {
+                            ForEach(visibleLogs) { entry in
+                                HStack(alignment: .top, spacing: 9) {
+                                    Text(entry.timestamp.formatted(date: .omitted, time: .standard))
+                                        .foregroundStyle(.secondary)
+                                    Text(entry.message)
+                                        .foregroundStyle(entry.level == "error" ? DevFlowTheme.danger : .primary)
+                                    Spacer()
+                                }
+                                .font(.system(size: 11, design: .monospaced))
+                                .textSelection(.enabled)
                             }
-                            .font(.system(size: 11, design: .monospaced))
-                            .textSelection(.enabled)
+                            Color.clear
+                                .frame(height: 1)
+                                .id("latest-log")
+                        }
+                        .padding(13)
+                    }
+                    .onAppear {
+                        proxy.scrollTo("latest-log", anchor: .bottom)
+                    }
+                    .onChange(of: visibleLogs.count) { _ in
+                        withAnimation(.easeOut(duration: 0.16)) {
+                            proxy.scrollTo("latest-log", anchor: .bottom)
                         }
                     }
-                    .padding(13)
                 }
                 .frame(maxHeight: 340)
                 .background(Color.black.opacity(colorScheme == .dark ? 0.25 : 0.035), in: RoundedRectangle(cornerRadius: 10))
@@ -492,39 +540,130 @@ private struct WorkItemContent: View {
     }
 }
 
-struct JobStageStrip: View {
-    let current: JobStage
-    private let stages: [JobStage] = [.runningAI, .reviewing, .awaitingApproval, .committing, .pulling, .pushing, .updatingTicket, .completed]
+private struct AIAnalysisPlanView: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.colorScheme) private var colorScheme
+    let ticket: Ticket
+    let item: WorkItem
+    let plan: String
 
     var body: some View {
-        HStack(spacing: 5) {
-            ForEach(stages, id: \.self) { stage in
-                VStack(spacing: 6) {
-                    Circle()
-                        .fill(stageColor(stage))
-                        .frame(width: 9, height: 9)
-                    Text(stage.rawValue)
-                        .font(.system(size: 9, weight: .medium))
-                        .lineLimit(1)
-                        .foregroundStyle(stage == current ? .primary : .secondary)
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("分析结果与修改方案")
+                        .font(.system(size: 17, weight: .semibold))
+                    Text("确认后 AI 才会开始修改本地代码")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
                 }
+                Spacer()
+                StatusDot(color: DevFlowTheme.warning, text: "等待方案确认")
+            }
+            .padding(.horizontal, 25)
+            .padding(.vertical, 16)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                SectionLabel(title: "AI 解决流程")
+                JobStageStrip(current: item.stage)
+            }
+            .padding(.horizontal, 25)
+            .padding(.vertical, 13)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    SectionLabel(title: "AI 分析与建议修改方案")
+                    Text(plan)
+                        .font(.system(size: 13))
+                        .lineSpacing(5)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(25)
+            }
+            .background(colorScheme == .dark ? Color.black.opacity(0.12) : Color.clear)
+
+            Divider()
+
+            HStack {
+                Button("返回配置") {
+                    appState.jobCoordinator.requestRevision(itemID: item.id)
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                Spacer()
+                Button {
+                    appState.jobCoordinator.approveAnalysisPlan(itemID: item.id)
+                } label: {
+                    Label("确认方案并开始修改", systemImage: "checkmark.shield.fill")
+                }
+                .buttonStyle(PrimaryButtonStyle())
+            }
+            .padding(.horizontal, 25)
+            .padding(.vertical, 16)
+        }
+    }
+}
+
+struct JobStageStrip: View {
+    let current: JobStage
+    private let steps = [
+        WorkflowStep(title: "分析", symbol: "magnifyingglass"),
+        WorkflowStep(title: "确认方案", symbol: "person.badge.shield.checkmark"),
+        WorkflowStep(title: "AI 修改", symbol: "wand.and.stars"),
+        WorkflowStep(title: "报告确认", symbol: "doc.text.magnifyingglass"),
+        WorkflowStep(title: "代码提交", symbol: "arrow.up.circle"),
+        WorkflowStep(title: "待测试", symbol: "checkmark.seal")
+    ]
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
+                VStack(spacing: 7) {
+                    Image(systemName: step.symbol)
+                        .font(.system(size: 14, weight: .semibold))
+                    Text(step.title)
+                        .font(.system(size: 10, weight: .medium))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(stepColor(index))
                 .frame(maxWidth: .infinity)
-                if stage != stages.last {
+                if index < steps.count - 1 {
                     Rectangle()
-                        .fill(Color.secondary.opacity(0.18))
-                        .frame(height: 1)
-                        .offset(y: -8)
+                        .fill(stepColor(index).opacity(0.35))
+                        .frame(width: 12, height: 1)
+                        .offset(y: -12)
                 }
             }
         }
     }
 
-    private func stageColor(_ stage: JobStage) -> Color {
-        guard let currentIndex = stages.firstIndex(of: current), let index = stages.firstIndex(of: stage) else {
-            return Color.secondary.opacity(0.25)
+    private func stepColor(_ index: Int) -> Color {
+        guard let reachedIndex = reachedStepIndex else {
+            return .secondary
         }
-        if index < currentIndex { return DevFlowTheme.success }
-        if index == currentIndex { return DevFlowTheme.accent }
-        return Color.secondary.opacity(0.22)
+        return index <= reachedIndex ? DevFlowTheme.accent : .secondary
+    }
+
+    private var reachedStepIndex: Int? {
+        switch current {
+        case .analyzing: 0
+        case .awaitingPlanApproval: 1
+        case .runningAI: 2
+        case .reviewing, .awaitingApproval: 3
+        case .committing, .pulling, .pushing, .partial: 4
+        case .updatingTicket, .completed: 5
+        case .preparing, .failed, .cancelled: nil
+        }
+    }
+
+    private struct WorkflowStep: Identifiable {
+        let title: String
+        let symbol: String
+
+        var id: String { title }
     }
 }

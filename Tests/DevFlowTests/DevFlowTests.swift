@@ -88,6 +88,14 @@ final class DevFlowTests: XCTestCase {
         XCTAssertTrue(prompt.contains("检查 lib/user/profile"))
     }
 
+    func testAnalysisPromptIsReadOnlyAndRequestsAModificationPlan() {
+        let prompt = PromptBuilder.buildAnalysis(ticket: SampleData.tickets[3], helperContext: "检查 lib/user/profile")
+        XCTAssertTrue(prompt.contains("绝对不要修改、创建或删除任何文件"))
+        XCTAssertTrue(prompt.contains("DEVFLOW_ROOT_CAUSE:"))
+        XCTAssertTrue(prompt.contains("DEVFLOW_PLAN:"))
+        XCTAssertTrue(JobStage.awaitingPlanApproval.requiresUserApproval)
+    }
+
     func testReportParserKeepsChangedFilesAndSections() {
         let report = PromptBuilder.parseReport(
             finalMessage: """

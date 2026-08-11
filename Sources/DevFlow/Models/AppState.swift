@@ -77,28 +77,33 @@ final class AppState: ObservableObject {
             return true
         }
         // 应用外观被强制覆盖时，effectiveAppearance 不可靠；再读一次系统外观名
-        let appearance = NSApp.effectiveAppearance
+        guard let application = NSApp else { return false }
+        let appearance = application.effectiveAppearance
         let match = appearance.bestMatch(from: [.darkAqua, .aqua])
         return match == .darkAqua
     }
 
     func applyAppearance() {
+        guard let application = NSApp else {
+            themeRevision &+= 1
+            return
+        }
         switch themePreference {
         case .system:
-            NSApp.appearance = nil
-            for window in NSApp.windows {
+            application.appearance = nil
+            for window in application.windows {
                 window.appearance = nil
             }
         case .light:
             let appearance = NSAppearance(named: .aqua)
-            NSApp.appearance = appearance
-            for window in NSApp.windows {
+            application.appearance = appearance
+            for window in application.windows {
                 window.appearance = appearance
             }
         case .dark:
             let appearance = NSAppearance(named: .darkAqua)
-            NSApp.appearance = appearance
-            for window in NSApp.windows {
+            application.appearance = appearance
+            for window in application.windows {
                 window.appearance = appearance
             }
         }
@@ -139,7 +144,7 @@ final class AppState: ObservableObject {
                 case .processing:
                     guard isInProcessingList(ticket) else { return false }
                 case .approval:
-                    guard activeWorkItem(for: ticket.id)?.stage == .awaitingApproval else { return false }
+                    guard activeWorkItem(for: ticket.id)?.stage.requiresUserApproval == true else { return false }
                 case .completed:
                     guard ticket.status == .completed || workItems.contains(where: { $0.ticketID == ticket.id && $0.stage == .completed }) else { return false }
                 case .repositories, .settings:
@@ -180,10 +185,10 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// 处理中：有进行中的任务且尚未到“等待确认”；或本地状态为处理中且无确认中任务。
+    /// 处理中：有进行中的任务且尚未到“等待用户确认”；或本地状态为处理中且无确认中任务。
     func isInProcessingList(_ ticket: Ticket) -> Bool {
         if let item = activeWorkItem(for: ticket.id) {
-            return item.stage != .awaitingApproval
+            return !item.stage.requiresUserApproval
         }
         return ticket.status == .processing
     }
@@ -208,7 +213,7 @@ final class AppState: ObservableObject {
         case .processing:
             tickets.filter { isInProcessingList($0) }.count
         case .approval:
-            workItems.filter { $0.stage == .awaitingApproval }.count
+            workItems.filter { $0.stage.requiresUserApproval }.count
         case .completed:
             workItems.filter { $0.stage == .completed }.count
         default:

@@ -20,7 +20,7 @@ final class JobCoordinator {
     ) async {
         guard appState.activeWorkItem(for: ticket.id) == nil else { return }
 
-        var item = WorkItem(
+        let item = WorkItem(
             ticketID: ticket.id,
             provider: provider,
             repositoryPath: repository.path,
@@ -33,6 +33,61 @@ final class JobCoordinator {
         appState.setTicketStatus(ticket.id, .processing)
         appState.closeTicketModal()
 
+        startAnalysis(for: item, ticket: ticket, repository: repository)
+    }
+
+    func approveAnalysisPlan(itemID: UUID) {
+        guard let item = item(id: itemID), item.stage == .awaitingPlanApproval,
+              let ticket = appState.tickets.first(where: { $0.id == item.ticketID }) else { return }
+
+        setStage(.runningAI, for: itemID)
+        append("修改方案已确认，正在开始修改代码", to: itemID)
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let execution = try await aiService.run(
+                    itemID: item.id,
+                    provider: item.provider,
+                    ticket: ticket,
+                    repositoryPath: item.repositoryPath,
+                    helperContext: item.helperContext,
+                    mode: .modification(confirmedPlan: item.analysisPlan ?? "")
+                ) { [weak self] message in
+                    Task { @MainActor in self?.append(message, to: item.id) }
+                }
+
+                setStage(.reviewing, for: item.id)
+                append("正在收集代码差异和修改文件", to: item.id)
+                let files = try await gitService.changedFiles(at: item.repositoryPath)
+                guard !files.isEmpty else {
+                    throw JobError.noChanges
+                }
+                let diff = try await gitService.diff(at: item.repositoryPath)
+                let report = PromptBuilder.parseReport(
+                    finalMessage: execution.finalMessage,
+                    rawOutput: execution.rawOutput,
+                    changedFiles: files,
+                    diff: diff
+                )
+                updateItem(item.id) {
+                    $0.report = report
+                    $0.stage = .awaitingApproval
+                    $0.updatedAt = Date()
+                    $0.logs.append(JobLogEntry(message: "修改报告已生成，等待人工确认"))
+                }
+            } catch is CancellationError {
+                setFailure("任务已取消", stage: .cancelled, for: item.id)
+            } catch {
+                setFailure(error.localizedDescription, stage: .failed, for: item.id)
+            }
+            tasks[item.id] = nil
+        }
+
+        tasks[item.id] = task
+    }
+
+    private func startAnalysis(for item: WorkItem, ticket: Ticket, repository: RepositoryConfig) {
         let task = Task { [weak self] in
             guard let self else { return }
             do {
@@ -45,39 +100,27 @@ final class JobCoordinator {
                 } else {
                     append("检测到本地未提交改动，已保留并继续；当前分支：\(validation.currentBranch)", to: item.id)
                 }
-                try await gitService.checkoutBranch(branch, at: repository.path)
-                append("已切换到分支：\(branch)", to: item.id)
-                setStage(.runningAI, for: item.id)
-                append("正在启动 \(provider.rawValue)", to: item.id)
+                try await gitService.checkoutBranch(item.branch, at: repository.path)
+                append("已切换到分支：\(item.branch)", to: item.id)
+                setStage(.analyzing, for: item.id)
+                append("正在使用 \(item.provider.rawValue) 分析问题和生成修改方案", to: item.id)
 
                 let execution = try await aiService.run(
                     itemID: item.id,
-                    provider: provider,
+                    provider: item.provider,
                     ticket: ticket,
                     repositoryPath: repository.path,
-                    helperContext: helperContext
+                    helperContext: item.helperContext,
+                    mode: .analysis
                 ) { [weak self] message in
                     Task { @MainActor in self?.append(message, to: item.id) }
                 }
 
-                setStage(.reviewing, for: item.id)
-                append("正在收集代码差异和修改文件", to: item.id)
-                let files = try await gitService.changedFiles(at: repository.path)
-                guard !files.isEmpty else {
-                    throw JobError.noChanges
-                }
-                let diff = try await gitService.diff(at: repository.path)
-                let report = PromptBuilder.parseReport(
-                    finalMessage: execution.finalMessage,
-                    rawOutput: execution.rawOutput,
-                    changedFiles: files,
-                    diff: diff
-                )
                 updateItem(item.id) {
-                    $0.report = report
-                    $0.stage = .awaitingApproval
+                    $0.analysisPlan = execution.finalMessage
+                    $0.stage = .awaitingPlanApproval
                     $0.updatedAt = Date()
-                    $0.logs.append(JobLogEntry(message: "修改报告已生成，等待人工确认"))
+                    $0.logs.append(JobLogEntry(message: "分析与修改方案已生成，等待用户确认"))
                 }
             } catch is CancellationError {
                 setFailure("任务已取消", stage: .cancelled, for: item.id)
@@ -102,8 +145,11 @@ final class JobCoordinator {
 
     func requestRevision(itemID: UUID) {
         updateItem(itemID) {
+            let message = $0.stage == .awaitingPlanApproval
+                ? "用户要求重新配置后再生成修改方案"
+                : "用户要求继续修改，可重新配置并启动下一轮"
             $0.stage = .cancelled
-            $0.logs.append(JobLogEntry(message: "用户要求继续修改，可重新配置并启动下一轮"))
+            $0.logs.append(JobLogEntry(message: message))
         }
     }
 

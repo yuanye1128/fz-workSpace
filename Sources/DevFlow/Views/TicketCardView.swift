@@ -24,7 +24,7 @@ struct TicketCardView: View {
 
     private var displayStatus: TicketStatus {
         if let item = appState.activeWorkItem(for: ticket.id) {
-            if item.stage == .awaitingApproval { return ticket.status }
+            if item.stage.requiresUserApproval { return ticket.status }
             return .processing
         }
         return ticket.status
@@ -154,7 +154,7 @@ struct TicketListRow: View {
     }
 
     private var displayStatus: TicketStatus {
-        if let item = appState.activeWorkItem(for: ticket.id), item.stage != .awaitingApproval {
+        if let item = appState.activeWorkItem(for: ticket.id), !item.stage.requiresUserApproval {
             return .processing
         }
         return ticket.status
