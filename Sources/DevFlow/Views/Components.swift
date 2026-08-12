@@ -4,14 +4,15 @@ import SwiftUI
 struct TagPill: View {
     let text: String
     let color: Color
+    var emphasized: Bool = false
 
     var body: some View {
         Text(text)
             .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 9)
+            .foregroundStyle(color.opacity(emphasized ? 1 : 0.92))
+            .padding(.horizontal, emphasized ? 10 : 9)
             .frame(height: 24)
-            .background(color.opacity(0.11), in: Capsule())
+            .background(color.opacity(emphasized ? 0.18 : 0.11), in: Capsule())
     }
 }
 

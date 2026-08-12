@@ -18,8 +18,8 @@ struct TicketCardView: View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
     }
 
-    private var priorityFill: Color {
-        ticket.priority.color.opacity(ticket.priority == .normal ? 0.35 : 0.88)
+    private var issueLinkColor: Color {
+        selected ? DevFlowTheme.accent : Color.secondary
     }
 
     private var displayStatus: TicketStatus {
@@ -31,91 +31,88 @@ struct TicketCardView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Color.clear
-                .frame(height: 4)
-
-            VStack(alignment: .leading, spacing: 13) {
-                HStack {
-                    Button {
-                        if let url = ticket.sourceURL {
-                            NSWorkspace.shared.open(url)
-                        }
-                    } label: {
-                        Text(ticket.issueNumber)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(selected ? DevFlowTheme.accent : .secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .contentShape(Rectangle())
-                            .hoverHighlight(cornerRadius: 6)
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(spacing: 8) {
+                Button {
+                    if let url = ticket.sourceURL {
+                        NSWorkspace.shared.open(url)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(ticket.sourceURL == nil)
-                    .help(ticket.sourceURL == nil ? "暂无原工单地址" : "打开原工单")
-                    Spacer()
-                    Text(ticket.projectName)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(ticket.kind.rawValue)
+                        Text(ticket.issueNumber)
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(issueLinkColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .contentShape(Rectangle())
+                    .hoverHighlight(cornerRadius: 6)
                 }
+                .buttonStyle(.plain)
+                .disabled(ticket.sourceURL == nil)
+                .help(ticket.sourceURL == nil ? "暂无原工单地址" : "打开原工单")
 
-                HStack(spacing: 8) {
-                    TagPill(text: ticket.kind.rawValue, color: ticket.kind.color)
-                    TagPill(text: ticket.priority.rawValue, color: ticket.priority.color)
-                }
+                TagPill(text: ticket.priority.rawValue, color: ticket.priority.color, emphasized: true)
 
-                Text(ticket.title)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, minHeight: 40, alignment: .topLeading)
-                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
 
-                Text(ticket.displayDescription)
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(DevFlowTheme.secondaryText(colorScheme))
-                    .lineSpacing(4)
-                    .lineLimit(3)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(ticket.projectName)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
 
-                HStack {
-                    TagPill(text: displayStatus.rawValue, color: displayStatus.color)
-                    Spacer()
-                    Text(ticket.targetVersion)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+            Text(ticket.title)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, minHeight: 40, alignment: .topLeading)
+                .fixedSize(horizontal: false, vertical: true)
 
-                Spacer(minLength: 0)
+            Text(ticket.displayDescription)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(DevFlowTheme.secondaryText(colorScheme))
+                .lineSpacing(4)
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .fixedSize(horizontal: false, vertical: true)
 
-                Divider()
+            HStack {
+                TagPill(text: displayStatus.rawValue, color: displayStatus.color)
+                Spacer()
+                Text(ticket.targetVersion)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
 
-                HStack {
-                    Text("更新于 \(ticket.updatedAt.devFlowTicketUpdatedText)")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Spacer()
-                    if ticket.status != .testing {
-                        if appState.destination == .processing {
-                            Button("移除") {
-                                appState.removeFromProcessing(ticketID: ticket.id)
-                            }
-                            .buttonStyle(CardActionButtonStyle())
-                        } else {
-                            Button("去解决") {
-                                appState.open(ticket: ticket, focusSolve: true)
-                            }
-                            .buttonStyle(CardActionButtonStyle())
+            Spacer(minLength: 0)
+
+            Divider()
+
+            HStack {
+                Text("更新于 \(ticket.updatedAt.devFlowTicketUpdatedText)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                if ticket.status != .testing {
+                    if appState.destination == .processing {
+                        Button("移除") {
+                            appState.removeFromProcessing(ticketID: ticket.id)
                         }
+                        .buttonStyle(CardActionButtonStyle())
+                    } else {
+                        Button("去解决") {
+                            appState.open(ticket: ticket, focusSolve: true)
+                        }
+                        .buttonStyle(CardActionButtonStyle())
                     }
                 }
             }
-            .padding(17)
         }
+        .padding(17)
         .frame(maxWidth: .infinity, minHeight: cardMinHeight, alignment: .topLeading)
         .background(DevFlowTheme.surface(colorScheme))
         .clipShape(cardShape)
@@ -125,17 +122,6 @@ struct TicketCardView: View {
                 lineWidth: selected ? 2 : 1
             )
         }
-        .overlay {
-            cardShape
-                .fill(priorityFill)
-                .mask {
-                    VStack(spacing: 0) {
-                        Rectangle().frame(height: 4)
-                        Spacer(minLength: 0)
-                    }
-                }
-                .allowsHitTesting(false)
-        }
         .compositingGroup()
         .shadow(color: .black.opacity(hovering ? 0.10 : 0.045), radius: hovering ? 8 : 3, x: 0, y: hovering ? 3 : 1)
         .contentShape(cardShape)
@@ -143,7 +129,7 @@ struct TicketCardView: View {
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.14), value: hovering)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(ticket.issueNumber)，\(ticket.title)，\(ticket.priority.rawValue)，\(displayStatus.rawValue)")
+        .accessibilityLabel("\(ticket.kind.rawValue) \(ticket.issueNumber)，\(ticket.title)，\(ticket.priority.rawValue)，\(displayStatus.rawValue)")
         .accessibilityAction(named: "查看详情") { appState.open(ticket: ticket) }
     }
 }
