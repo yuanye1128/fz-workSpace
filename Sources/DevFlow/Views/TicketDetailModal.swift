@@ -116,29 +116,25 @@ struct TicketDetailModal: View {
         }
     }
 
-    private var headerStatus: TicketStatus {
-        if let item = appState.activeWorkItem(for: ticket.id), !item.stage.requiresUserApproval {
-            return .processing
-        }
-        return ticket.status
-    }
-
     private var header: some View {
         HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 9) {
-                HStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                HStack(spacing: 5) {
+                    Text(ticket.kind.rawValue)
                     Text(ticket.issueNumber)
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(DevFlowTheme.accent)
-                    TagPill(text: ticket.kind.rawValue, color: ticket.kind.color)
-                    TagPill(text: ticket.priority.rawValue, color: ticket.priority.color)
-                    TagPill(text: headerStatus.rawValue, color: headerStatus.color)
                 }
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(DevFlowTheme.accent)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(DevFlowTheme.accent.opacity(0.12), in: Capsule())
+                .padding(.top, 3)
+
                 Text(ticket.title)
                     .font(.system(size: 23, weight: .bold))
                     .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Spacer()
             Button {
                 requestClose()
             } label: {
