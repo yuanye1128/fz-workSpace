@@ -10,16 +10,12 @@ struct TicketCardView: View {
     private let cornerRadius: CGFloat = 12
     private let cardMinHeight: CGFloat = 296
 
-    private var selected: Bool {
-        appState.selectedTicket?.id == ticket.id
-    }
-
     private var cardShape: RoundedRectangle {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
     }
 
-    private var issueLinkColor: Color {
-        selected ? DevFlowTheme.accent : Color.secondary
+    private var priorityAccentColor: Color {
+        ticket.priority.color.opacity(ticket.priority == .normal ? 0.45 : 0.82)
     }
 
     private var displayStatus: TicketStatus {
@@ -38,16 +34,17 @@ struct TicketCardView: View {
                         NSWorkspace.shared.open(url)
                     }
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
                         Text(ticket.kind.rawValue)
                         Text(ticket.issueNumber)
                     }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(issueLinkColor)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .contentShape(Rectangle())
-                    .hoverHighlight(cornerRadius: 6)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(DevFlowTheme.accent)
+                    .padding(.horizontal, 10)
+                    .frame(height: 24)
+                    .background(DevFlowTheme.accent.opacity(0.12), in: Capsule())
+                    .contentShape(Capsule())
+                    .hoverHighlight(cornerRadius: 12)
                 }
                 .buttonStyle(.plain)
                 .disabled(ticket.sourceURL == nil)
@@ -114,13 +111,17 @@ struct TicketCardView: View {
         }
         .padding(17)
         .frame(maxWidth: .infinity, minHeight: cardMinHeight, alignment: .topLeading)
-        .background(DevFlowTheme.surface(colorScheme))
+        .background {
+            ZStack(alignment: .leading) {
+                DevFlowTheme.surface(colorScheme)
+                priorityAccentColor
+                    .frame(width: 3)
+                    .frame(maxHeight: .infinity)
+            }
+        }
         .clipShape(cardShape)
         .overlay {
-            cardShape.strokeBorder(
-                selected ? DevFlowTheme.accent : DevFlowTheme.border(colorScheme),
-                lineWidth: selected ? 2 : 1
-            )
+            cardShape.strokeBorder(DevFlowTheme.border(colorScheme), lineWidth: 1)
         }
         .compositingGroup()
         .shadow(color: .black.opacity(hovering ? 0.10 : 0.045), radius: hovering ? 8 : 3, x: 0, y: hovering ? 3 : 1)
