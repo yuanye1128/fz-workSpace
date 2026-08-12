@@ -45,6 +45,10 @@ struct TicketCardView: View {
                         Text(ticket.issueNumber)
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(selected ? DevFlowTheme.accent : .secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .contentShape(Rectangle())
+                            .hoverHighlight(cornerRadius: 6)
                     }
                     .buttonStyle(.plain)
                     .disabled(ticket.sourceURL == nil)
@@ -176,6 +180,10 @@ struct TicketListRow: View {
                         Text(ticket.issueNumber)
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(selected ? DevFlowTheme.accent : .secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .contentShape(Rectangle())
+                            .hoverHighlight(cornerRadius: 6)
                     }
                     .buttonStyle(.plain)
                     .disabled(ticket.sourceURL == nil)

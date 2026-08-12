@@ -8,8 +8,11 @@ struct TicketBoardView: View {
     private let gridSpacing: CGFloat = 16
     /// 滚动内容相对边缘的留白（上下左右一致）
     private let gridPadding: CGFloat = 24
-    private let minimumCardWidth: CGFloat = 360
+    private let minimumCardWidth: CGFloat = 320
+    private let minimumColumnCount = 2
     private let maximumGridColumnCount = 4
+
+    @State private var topBarWidth: CGFloat = 1200
 
     private func gridContentWidth(for availableWidth: CGFloat) -> CGFloat {
         max(0, availableWidth - gridPadding * 2)
@@ -17,10 +20,8 @@ struct TicketBoardView: View {
 
     private func gridColumns(for availableWidth: CGFloat) -> [GridItem] {
         let contentWidth = gridContentWidth(for: availableWidth)
-        let columnCount = min(
-            maximumGridColumnCount,
-            max(1, Int((contentWidth + gridSpacing) / (minimumCardWidth + gridSpacing)))
-        )
+        let fitted = Int((contentWidth + gridSpacing) / (minimumCardWidth + gridSpacing))
+        let columnCount = min(maximumGridColumnCount, max(minimumColumnCount, fitted))
         return Array(
             repeating: GridItem(.flexible(minimum: 0), spacing: gridSpacing, alignment: .top),
             count: columnCount
@@ -92,20 +93,29 @@ struct TicketBoardView: View {
     }
 
     private var topBar: some View {
-        HStack(spacing: 18) {
+        let isCompact = topBarWidth < 980
+        let isNarrow = topBarWidth < 860
+        let titleMax: CGFloat = isNarrow ? 160 : (isCompact ? 220 : 360)
+        let searchMin: CGFloat = isNarrow ? 120 : (isCompact ? 150 : 170)
+        let searchIdeal: CGFloat = isNarrow ? 160 : (isCompact ? 220 : 330)
+        let barSpacing: CGFloat = isNarrow ? 8 : (isCompact ? 12 : 18)
+
+        return HStack(spacing: barSpacing) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(appState.selectedTitle)
-                    .font(.system(size: 26, weight: .bold))
+                    .font(.system(size: isNarrow ? 22 : 26, weight: .bold))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                 Text(appState.needsLogin ? "登录后同步知识库工单" : "今天有 \(appState.filteredTickets.count) 个待处理事项")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            .frame(minWidth: 220, idealWidth: 260, maxWidth: 360, alignment: .leading)
+            .frame(minWidth: 0, idealWidth: min(260 as CGFloat, titleMax), maxWidth: titleMax, alignment: .leading)
             .layoutPriority(1)
 
-            Spacer(minLength: 12)
+            // 随窗口宽度伸缩，窄屏时可收至 0，避免顶栏被挤出
+            Spacer(minLength: 0)
 
             HStack(spacing: 9) {
                 Image(systemName: "magnifyingglass")
@@ -115,13 +125,13 @@ struct TicketBoardView: View {
                     .font(.system(size: 14))
             }
             .padding(.horizontal, 14)
-            .frame(minWidth: 170, idealWidth: 330, maxWidth: 420, minHeight: 40, maxHeight: 40)
+            .frame(minWidth: searchMin, idealWidth: searchIdeal, maxWidth: 420, minHeight: 40, maxHeight: 40)
             .background(DevFlowTheme.surface(colorScheme), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(DevFlowTheme.border(colorScheme)))
             .layoutPriority(0)
 
             HStack(spacing: 10) {
-                syncIndicator
+                syncIndicator(compact: isCompact)
 
                 Button {
                     if appState.needsLogin {
@@ -139,7 +149,9 @@ struct TicketBoardView: View {
                             Image(systemName: appState.needsLogin ? "person.crop.circle.badge.plus" : "arrow.clockwise")
                                 .frame(width: 14, height: 14)
                         }
-                        Text(appState.needsLogin ? "去登录" : "刷新")
+                        if !isNarrow {
+                            Text(appState.needsLogin ? "去登录" : "刷新")
+                        }
                     }
                 }
                 .buttonStyle(SecondaryButtonStyle())
@@ -186,40 +198,60 @@ struct TicketBoardView: View {
             .fixedSize(horizontal: true, vertical: false)
             .layoutPriority(2)
         }
-        .padding(.leading, 28)
-        .padding(.trailing, 22)
+        .padding(.leading, isNarrow ? 18 : 28)
+        .padding(.trailing, isNarrow ? 14 : 22)
         .padding(.top, 10)
         .padding(.bottom, 20)
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(key: TopBarWidthKey.self, value: geometry.size.width)
+            }
+        }
+        .onPreferenceChange(TopBarWidthKey.self) { topBarWidth = $0 }
     }
 
-    private var syncIndicator: some View {
+    private func syncIndicator(compact: Bool) -> some View {
         HStack(spacing: 7) {
             switch appState.syncStatus {
             case .syncing:
                 ProgressView().controlSize(.small)
-                Text("正在同步")
+                if !compact { Text("正在同步") }
             case let .synced(date):
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(DevFlowTheme.success)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("知识库已同步")
-                    Text("上次同步于 \(date.formatted(.dateTime.year().month().day().hour().minute()))")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                if !compact {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("知识库已同步")
+                        Text("上次同步于 \(date.formatted(.dateTime.year().month().day().hour().minute()))")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             case .loginRequired:
                 Image(systemName: "person.crop.circle.badge.exclamationmark").foregroundStyle(DevFlowTheme.warning)
-                Text("需要登录")
+                if !compact { Text("需要登录") }
             case .failed:
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(DevFlowTheme.danger)
-                Text("同步失败")
+                if !compact { Text("同步失败") }
             case .idle:
                 Image(systemName: "circle.dashed").foregroundStyle(.secondary)
-                Text("尚未同步")
+                if !compact { Text("尚未同步") }
             }
         }
         .font(.system(size: 13, weight: .medium))
         .foregroundStyle(.secondary)
         .lineLimit(1)
+        .help(syncStatusHelpText)
+    }
+
+    private var syncStatusHelpText: String {
+        switch appState.syncStatus {
+        case .syncing: return "正在同步"
+        case let .synced(date):
+            return "知识库已同步 · 上次同步于 \(date.formatted(.dateTime.year().month().day().hour().minute()))"
+        case .loginRequired: return "需要登录"
+        case .failed: return "同步失败"
+        case .idle: return "尚未同步"
+        }
     }
 
     private var filterBar: some View {
@@ -394,5 +426,12 @@ private struct NewTicketNotificationsPopover: View {
         }
         .padding(16)
         .frame(width: 372)
+    }
+}
+
+private struct TopBarWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 1200
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }

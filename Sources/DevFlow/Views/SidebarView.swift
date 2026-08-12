@@ -28,6 +28,9 @@ struct SidebarView: View {
                 Button(action: { appState.select(destination: .repositories) }) {
                     Image(systemName: "plus")
                         .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                        .hoverHighlight(cornerRadius: 6)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
@@ -54,11 +57,7 @@ struct SidebarView: View {
             .padding(.bottom, 18)
         }
         .background {
-            ZStack {
-                SidebarVisualEffectView()
-                Rectangle().fill(DevFlowTheme.sidebar(colorScheme))
-            }
-            .ignoresSafeArea()
+            SidebarBackdrop()
         }
     }
 
@@ -98,8 +97,12 @@ struct SidebarView: View {
             .foregroundStyle(selected ? DevFlowTheme.accent : Color.primary.opacity(0.82))
             .padding(.horizontal, 14)
             .frame(height: 43)
-            .background(selected ? DevFlowTheme.selectedFill(colorScheme) : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .contentShape(Rectangle())
+            .hoverHighlight(
+                isActive: selected,
+                activeFill: DevFlowTheme.selectedFill(colorScheme),
+                cornerRadius: 9
+            )
         }
         .buttonStyle(.plain)
     }
@@ -119,10 +122,26 @@ struct SidebarView: View {
             .foregroundStyle(selected ? DevFlowTheme.accent : Color.primary.opacity(0.82))
             .padding(.horizontal, 14)
             .frame(height: 43)
-            .background(selected ? DevFlowTheme.selectedFill(colorScheme) : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .contentShape(Rectangle())
+            .hoverHighlight(
+                isActive: selected,
+                activeFill: DevFlowTheme.selectedFill(colorScheme),
+                cornerRadius: 9
+            )
         }
         .buttonStyle(.plain)
+    }
+}
+
+struct SidebarBackdrop: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ZStack {
+            SidebarVisualEffectView()
+            Rectangle().fill(DevFlowTheme.sidebar(colorScheme))
+        }
+        .ignoresSafeArea()
     }
 }
 

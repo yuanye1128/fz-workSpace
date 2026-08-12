@@ -44,6 +44,8 @@ final class AppState: ObservableObject {
     lazy var knowledgeBaseSession = KnowledgeBaseSessionController()
     lazy var jobCoordinator = JobCoordinator(appState: self)
     private var syncInProgress = false
+    private var hasPerformedLaunchSync = false
+    private var automaticSyncLoopStarted = false
     private var systemThemeObserver: NSObjectProtocol?
 
     init() {
@@ -360,8 +362,11 @@ final class AppState: ObservableObject {
         )
     }
 
-    /// 启动时若曾登录或本地已有 Cookie，则先恢复 Cookie 再同步最新工单。
+    /// 进程启动时若曾登录或本地已有 Cookie，则先恢复 Cookie 再同步最新工单。
+    /// 仅执行一次：关闭窗口从程序坞再开不会再次同步。
     func restoreSessionIfNeeded() async {
+        guard !hasPerformedLaunchSync else { return }
+        hasPerformedLaunchSync = true
         await knowledgeBaseSession.prepareSession(using: persistence)
         guard hasAuthenticatedSession || persistence.hasPersistedCookies || !tickets.isEmpty else {
             syncStatus = .loginRequired
@@ -372,17 +377,24 @@ final class AppState: ObservableObject {
     }
 
     func runAutomaticSyncLoop() async {
+        guard !automaticSyncLoopStarted else { return }
+        automaticSyncLoopStarted = true
         while !Task.isCancelled {
             let interval = clampedAutoSyncIntervalHours
             do {
                 try await Task.sleep(nanoseconds: UInt64(interval) * 60 * 60 * 1_000_000_000)
             } catch {
+                automaticSyncLoopStarted = false
                 return
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                automaticSyncLoopStarted = false
+                return
+            }
             guard hasAuthenticatedSession || persistence.hasPersistedCookies || !tickets.isEmpty else { continue }
             await knowledgeBaseSession.sync(using: self, background: true)
         }
+        automaticSyncLoopStarted = false
     }
 
     func presentNewTicketNotifications() {

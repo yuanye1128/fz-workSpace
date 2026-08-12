@@ -2,6 +2,17 @@ import AppKit
 import Darwin
 import SwiftUI
 
+enum WindowChrome {
+    static let sidebarWidth: CGFloat = 250
+    /// 保证工单卡片最少两列所需的内容区最小宽度（含左右 padding）
+    static let minBoardWidth: CGFloat = 800
+    static let minHeight: CGFloat = 700
+
+    static func minWidth(sidebarCollapsed: Bool) -> CGFloat {
+        minBoardWidth + (sidebarCollapsed ? 0 : sidebarWidth)
+    }
+}
+
 @main
 struct DevFlowApp: App {
     @StateObject private var appState: AppState
@@ -19,7 +30,6 @@ struct DevFlowApp: App {
                 .environmentObject(appState)
                 .preferredColorScheme(appState.preferredSwiftUIColorScheme)
                 .id(appState.themeRevision)
-                .frame(minWidth: 1024, minHeight: 700)
                 .onAppear {
                     NSWindow.allowsAutomaticWindowTabbing = false
                     appState.applyAppearance()
@@ -37,6 +47,7 @@ struct DevFlowApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unifiedCompact(showsTitle: false))
+        .windowResizability(.contentMinSize)
         .defaultSize(width: 1440, height: 900)
         Settings {
             SettingsView()

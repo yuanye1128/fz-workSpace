@@ -28,30 +28,191 @@ struct PrimaryButtonStyle: ButtonStyle {
 }
 
 struct SecondaryButtonStyle: ButtonStyle {
-    @Environment(\.colorScheme) private var colorScheme
-
     func makeBody(configuration: Configuration) -> some View {
+        SecondaryButtonBody(configuration: configuration)
+    }
+}
+
+private struct SecondaryButtonBody: View {
+    let configuration: ButtonStyleConfiguration
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered = false
+
+    var body: some View {
         configuration.label
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(.primary)
             .padding(.horizontal, 13)
             .frame(minHeight: 38)
-            .background(DevFlowTheme.surface(colorScheme).opacity(configuration.isPressed ? 0.72 : 1), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(DevFlowTheme.border(colorScheme)))
+            .background(
+                DevFlowTheme.surface(colorScheme),
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.primary.opacity(hoverFillOpacity))
+                    .allowsHitTesting(false)
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(DevFlowTheme.border(colorScheme))
+            )
+            .overlay {
+                NativeHoverReader(isHovered: $isHovered)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .animation(.easeOut(duration: 0.12), value: isHovered)
+    }
+
+    private var hoverFillOpacity: Double {
+        if configuration.isPressed { return 0.14 }
+        if isHovered { return 0.08 }
+        return 0
     }
 }
 
 struct CardActionButtonStyle: ButtonStyle {
-    @Environment(\.colorScheme) private var colorScheme
-
     func makeBody(configuration: Configuration) -> some View {
+        CardActionButtonBody(configuration: configuration)
+    }
+}
+
+private struct CardActionButtonBody: View {
+    let configuration: ButtonStyleConfiguration
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered = false
+
+    var body: some View {
         configuration.label
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(DevFlowTheme.accent)
             .padding(.horizontal, 13)
             .frame(height: 33)
-            .background(DevFlowTheme.accent.opacity(configuration.isPressed ? 0.13 : 0.05), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(DevFlowTheme.accent.opacity(0.25)))
+            .background(
+                DevFlowTheme.accent.opacity(configuration.isPressed ? 0.16 : (isHovered ? 0.10 : 0.05)),
+                in: RoundedRectangle(cornerRadius: 8)
+            )
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(DevFlowTheme.accent.opacity(isHovered || configuration.isPressed ? 0.4 : 0.25)))
+            .overlay {
+                NativeHoverReader(isHovered: $isHovered)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .animation(.easeOut(duration: 0.12), value: isHovered)
+    }
+}
+
+/// AppKit 级悬停探测，避免 SwiftUI Button/Menu 吞掉 onHover。
+struct NativeHoverReader: NSViewRepresentable {
+    @Binding var isHovered: Bool
+
+    func makeNSView(context: Context) -> NativeHoverView {
+        let view = NativeHoverView()
+        view.onHoverChange = { hovering in
+            DispatchQueue.main.async {
+                if isHovered != hovering {
+                    isHovered = hovering
+                }
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NativeHoverView, context: Context) {
+        nsView.onHoverChange = { hovering in
+            DispatchQueue.main.async {
+                if isHovered != hovering {
+                    isHovered = hovering
+                }
+            }
+        }
+    }
+}
+
+final class NativeHoverView: NSView {
+    var onHoverChange: ((Bool) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        updateTrackingAreas()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        addTrackingArea(
+            NSTrackingArea(
+                rect: bounds,
+                options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect, .enabledDuringMouseDrag],
+                owner: self,
+                userInfo: nil
+            )
+        )
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHoverChange?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHoverChange?(false)
+    }
+}
+
+/// 系统风格悬停浅底，用于侧栏项、工单号等 plain 按钮。
+struct HoverHighlightModifier: ViewModifier {
+    var cornerRadius: CGFloat = 8
+    var isActive: Bool = false
+    var activeFill: Color = .clear
+    var hoverOpacity: Double = 0.08
+
+    @State private var isHovered = false
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(fillColor)
+            }
+            .overlay {
+                NativeHoverReader(isHovered: $isHovered)
+            }
+            .animation(.easeOut(duration: 0.12), value: isHovered)
+    }
+
+    private var fillColor: Color {
+        if isActive { return activeFill }
+        if isHovered { return Color.primary.opacity(hoverOpacity) }
+        return .clear
+    }
+}
+
+extension View {
+    func hoverHighlight(
+        isActive: Bool = false,
+        activeFill: Color = .clear,
+        cornerRadius: CGFloat = 8,
+        hoverOpacity: Double = 0.08
+    ) -> some View {
+        modifier(
+            HoverHighlightModifier(
+                cornerRadius: cornerRadius,
+                isActive: isActive,
+                activeFill: activeFill,
+                hoverOpacity: hoverOpacity
+            )
+        )
     }
 }
 
