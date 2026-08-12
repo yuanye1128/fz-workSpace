@@ -33,6 +33,8 @@ final class AIService: @unchecked Sendable {
 
     func run(
         provider: AIProvider,
+        modelID: String? = nil,
+        reasoningEffort: String? = nil,
         ticket: Ticket,
         repositoryPath: String,
         helperContext: String,
@@ -53,31 +55,49 @@ final class AIService: @unchecked Sendable {
         switch provider {
         case .codex:
             command = "codex"
-            arguments = [
+            var args = [
                 "exec",
                 "--json",
                 "--sandbox", mode.isAnalysis ? "read-only" : "workspace-write",
                 "--color", "never",
-                "-C", repositoryPath,
-                prompt
+                "-C", repositoryPath
             ]
+            if let modelID, !modelID.isEmpty {
+                args += ["-m", modelID]
+            }
+            if let reasoningEffort, !reasoningEffort.isEmpty {
+                args += ["-c", "model_reasoning_effort=\"\(reasoningEffort)\""]
+            }
+            args.append(prompt)
+            arguments = args
         case .cursor:
             command = "cursor-agent"
-            arguments = [
+            var args = [
                 "-p",
                 "--force",
-                "--output-format", "stream-json",
-                prompt
+                "--output-format", "stream-json"
             ]
+            if let modelID, !modelID.isEmpty {
+                args += ["--model", cursorModelArgument(modelID: modelID, reasoningEffort: reasoningEffort)]
+            }
+            args.append(prompt)
+            arguments = args
         case .claude:
             command = "claude"
-            arguments = [
+            var args = [
                 "-p",
                 "--output-format", "stream-json",
                 "--verbose",
-                "--permission-mode", "bypassPermissions",
-                prompt
+                "--permission-mode", "bypassPermissions"
             ]
+            if let modelID, !modelID.isEmpty {
+                args += ["--model", modelID]
+            }
+            if let reasoningEffort, !reasoningEffort.isEmpty {
+                args += ["--effort", reasoningEffort]
+            }
+            args.append(prompt)
+            arguments = args
         }
 
         let execution = try runner.start(
@@ -93,6 +113,13 @@ final class AIService: @unchecked Sendable {
         }
 
         return try Self.executionResult(from: result, command: command, provider: provider)
+    }
+
+    private func cursorModelArgument(modelID: String, reasoningEffort: String?) -> String {
+        guard let reasoningEffort, !reasoningEffort.isEmpty, !modelID.contains("[") else {
+            return modelID
+        }
+        return "\(modelID)[effort=\(reasoningEffort)]"
     }
 
     func resume(

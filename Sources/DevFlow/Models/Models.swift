@@ -111,6 +111,32 @@ enum AIProvider: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+struct AIModelOption: Identifiable, Hashable, Sendable {
+    var id: String { slug }
+    var slug: String
+    var displayName: String
+    var reasoningLevels: [String]
+    var defaultReasoning: String?
+
+    var supportsReasoning: Bool { !reasoningLevels.isEmpty }
+}
+
+enum AIReasoningEffort {
+    static let displayNames: [String: String] = [
+        "minimal": "极低",
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "xhigh": "很高",
+        "max": "最大",
+        "ultra": "极致"
+    ]
+
+    static func displayName(for effort: String) -> String {
+        displayNames[effort] ?? effort
+    }
+}
+
 enum ThemePreference: String, Codable, CaseIterable, Identifiable {
     case system = "跟随系统"
     case light = "浅色"
@@ -258,6 +284,8 @@ struct WorkItem: Identifiable, Codable, Equatable {
     var id = UUID()
     var ticketID: Int
     var provider: AIProvider
+    var modelID: String? = nil
+    var reasoningEffort: String? = nil
     var repositoryPath: String
     var branch: String
     var helperContext: String

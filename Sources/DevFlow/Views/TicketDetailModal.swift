@@ -7,7 +7,13 @@ struct TicketDetailModal: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var selectedRepositoryID: UUID?
     @State private var branch = ""
+    @State private var isLoadingBranch = false
     @State private var provider: AIProvider = .codex
+    @State private var availableModels: [AIModelOption] = []
+    @State private var selectedModelID = ""
+    @State private var customModelID = ""
+    @State private var selectedReasoningEffort = ""
+    @State private var isLoadingModels = false
     @State private var helperContext = ""
     @State private var showingCloseConfirmation = false
     @State private var isDroppingHelperFiles = false
@@ -23,6 +29,28 @@ struct TicketDetailModal: View {
 
     private var selectedRepository: RepositoryConfig? {
         repositories.first { $0.id == selectedRepositoryID }
+    }
+
+    private var selectedModel: AIModelOption? {
+        availableModels.first { $0.slug == selectedModelID }
+    }
+
+    private var effectiveModelID: String? {
+        guard provider != .cursor else { return nil }
+        if !availableModels.isEmpty {
+            return selectedModelID.isEmpty ? nil : selectedModelID
+        }
+        let custom = customModelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return custom.isEmpty ? nil : custom
+    }
+
+    private var effectiveReasoningEffort: String? {
+        guard provider != .cursor else { return nil }
+        guard !selectedReasoningEffort.isEmpty else { return nil }
+        if let selectedModel {
+            return selectedModel.reasoningLevels.contains(selectedReasoningEffort) ? selectedReasoningEffort : nil
+        }
+        return availableModels.isEmpty ? selectedReasoningEffort : nil
     }
 
     private var workItem: WorkItem? {
@@ -69,6 +97,13 @@ struct TicketDetailModal: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(DevFlowTheme.border(colorScheme)))
         .task {
             configureDefaults()
+            await reloadModels(for: provider)
+        }
+        .onChange(of: provider) { newProvider in
+            Task { await reloadModels(for: newProvider) }
+        }
+        .onChange(of: selectedModelID) { _ in
+            applyDefaultEffort(for: selectedModel)
         }
         .onChange(of: appState.ticketModalCloseRequestID) { _ in
             requestClose()
@@ -132,11 +167,10 @@ struct TicketDetailModal: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 17) {
-                        SectionLabel(title: "解决配置")
-                            .id("solve-config")
+//                        SectionLabel(title: "解决配置")
+//                            .id("solve-config")
 
-                        repositoryPicker
-                        branchField
+                        repositoryAndBranchRow
                         providerPicker
                         helperField
                         actionButtons
@@ -205,62 +239,74 @@ struct TicketDetailModal: View {
         }
     }
 
-    private var repositoryPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("选择代码仓库")
-                .font(.system(size: 12, weight: .semibold))
-            if repositories.isEmpty {
-                Button {
-                    appState.closeTicketModal()
-                    appState.select(destination: .repositories)
-                } label: {
-                    HStack {
-                        Image(systemName: "folder.badge.plus")
-                        Text("尚未配置仓库，前往添加")
-                        Spacer()
-                        Image(systemName: "chevron.right")
+    private var repositoryAndBranchRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("选择代码仓库")
+                    .font(.system(size: 12, weight: .semibold))
+                if repositories.isEmpty {
+                    Button {
+                        appState.closeTicketModal()
+                        appState.select(destination: .repositories)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder.badge.plus")
+                            Text("尚未配置仓库，前往添加")
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                        }
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(DevFlowTheme.accent)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(DevFlowTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
                     }
-                    .foregroundStyle(DevFlowTheme.accent)
-                    .padding(.horizontal, 12)
-                    .frame(height: 42)
-                    .background(DevFlowTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
-                }
-                .buttonStyle(.plain)
-            } else {
-                Picker("", selection: $selectedRepositoryID) {
-                    ForEach(repositories) { repository in
-                        Text(repository.displayName).tag(Optional(repository.id))
+                    .buttonStyle(.plain)
+                } else {
+                    Picker("", selection: $selectedRepositoryID) {
+                        ForEach(repositories) { repository in
+                            Text(repository.displayName).tag(Optional(repository.id))
+                        }
                     }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .onChange(of: selectedRepositoryID) { _ in
-                    Task { await loadCurrentBranch() }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .onChange(of: selectedRepositoryID) { _ in
+                        Task { await loadCurrentBranch() }
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .trailing, spacing: 8) {
+                Text("当前分支")
+                    .font(.system(size: 12, weight: .semibold))
+                currentBranchDisplay
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var branchField: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("当前分支")
-                .font(.system(size: 12, weight: .semibold))
-            HStack(spacing: 9) {
-                Image(systemName: "arrow.triangle.branch")
-                    .foregroundStyle(.secondary)
-                TextField("例如 feature/issue-\(ticket.id)", text: $branch)
-                    .textFieldStyle(.plain)
+    private var currentBranchDisplay: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+            if isLoadingBranch {
+                ProgressView()
+                    .controlSize(.mini)
+            } else {
+                Text(branch.isEmpty ? "—" : branch)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(branch.isEmpty ? .tertiary : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
-            .padding(.horizontal, 11)
-            .frame(height: 40)
-            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(DevFlowTheme.border(colorScheme)))
         }
+        .help(branch.isEmpty ? "选择仓库后显示当前分支" : branch)
     }
 
     private var providerPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("AI 工具")
                 .font(.system(size: 12, weight: .semibold))
             Picker("AI 工具", selection: $provider) {
@@ -270,7 +316,73 @@ struct TicketDetailModal: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
+
+            if provider != .cursor {
+                if isLoadingModels {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("正在读取可用模型…")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    modelAndEffortRow
+                }
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var showsReasoningPicker: Bool {
+        if let levels = selectedModel?.reasoningLevels, !levels.isEmpty {
+            return true
+        }
+        return availableModels.isEmpty
+            && !customModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var reasoningLevelsForPicker: [String] {
+        selectedModel?.reasoningLevels ?? ["low", "medium", "high", "xhigh", "max"]
+    }
+
+    private var modelAndEffortRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("模型")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                if !availableModels.isEmpty {
+                    Picker("模型", selection: $selectedModelID) {
+                        ForEach(availableModels) { model in
+                            Text(model.displayName).tag(model.slug)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                } else {
+                    TextField("例如 gpt-5.6-sol", text: $customModelID)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if showsReasoningPicker {
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text("思考强度")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Picker("思考强度", selection: $selectedReasoningEffort) {
+                        ForEach(reasoningLevelsForPicker, id: \.self) { effort in
+                            Text(AIReasoningEffort.displayName(for: effort)).tag(effort)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                }
+                .fixedSize(horizontal: true, vertical: false)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var helperField: some View {
@@ -292,12 +404,12 @@ struct TicketDetailModal: View {
                     }
                     .buttonStyle(CardActionButtonStyle())
 
-                    Text("可选")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(DevFlowTheme.accent)
-                        .padding(.horizontal, 8)
-                        .frame(height: 22)
-                        .background(DevFlowTheme.accent.opacity(0.12), in: Capsule())
+//                    Text("可选")
+//                        .font(.system(size: 11, weight: .medium))
+//                        .foregroundStyle(DevFlowTheme.accent)
+//                        .padding(.horizontal, 8)
+//                        .frame(height: 22)
+//                        .background(DevFlowTheme.accent.opacity(0.12), in: Capsule())
                 }
             }
             PathDropTextEditor(
@@ -378,6 +490,8 @@ struct TicketDetailModal: View {
                         repository: selectedRepository,
                         branch: branch,
                         provider: provider,
+                        modelID: effectiveModelID,
+                        reasoningEffort: effectiveReasoningEffort,
                         helperContext: helperContext
                     )
                 }
@@ -418,13 +532,48 @@ struct TicketDetailModal: View {
     }
 
     private func loadCurrentBranch() async {
-        guard let selectedRepository else { return }
+        guard let selectedRepository else {
+            branch = ""
+            return
+        }
+        isLoadingBranch = true
+        defer { isLoadingBranch = false }
         let validation = await GitService().validateRepository(path: selectedRepository.path)
         if !validation.currentBranch.isEmpty {
             branch = validation.currentBranch
         } else if branch.isEmpty {
             branch = selectedRepository.defaultBranch
         }
+    }
+
+    private func reloadModels(for provider: AIProvider) async {
+        if provider == .cursor {
+            availableModels = []
+            selectedModelID = ""
+            customModelID = ""
+            selectedReasoningEffort = ""
+            isLoadingModels = false
+            return
+        }
+
+        isLoadingModels = true
+        defer { isLoadingModels = false }
+        let models = await AIModelCatalog.loadModels(for: provider)
+        availableModels = models
+        if let preferred = AIModelCatalog.preferredModel(from: models, provider: provider) {
+            selectedModelID = preferred.slug
+            customModelID = preferred.slug
+            applyDefaultEffort(for: preferred)
+        } else {
+            selectedModelID = ""
+            if customModelID.isEmpty {
+                selectedReasoningEffort = provider == .claude ? "high" : "medium"
+            }
+        }
+    }
+
+    private func applyDefaultEffort(for model: AIModelOption?) {
+        selectedReasoningEffort = AIModelCatalog.preferredEffort(for: model, provider: provider) ?? ""
     }
 
     private func requestClose() {

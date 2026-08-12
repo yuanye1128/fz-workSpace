@@ -160,9 +160,13 @@ private struct RepositoryRow: View {
                     Button("移除", role: .destructive) { appState.removeRepository(id: repository.id) }
                 } label: {
                     Image(systemName: "ellipsis")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.secondary)
                         .frame(width: 30, height: 30)
+                        .contentShape(Rectangle())
                 }
                 .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
             }
 
             HStack(spacing: 12) {
@@ -182,14 +186,6 @@ private struct RepositoryRow: View {
                     .frame(minWidth: 160, alignment: .leading)
                     .frame(height: 29)
                     .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 6))
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("远程").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
-                    Text(repository.remoteName)
-                        .font(.system(size: 13, design: .monospaced))
-                        .padding(.horizontal, 10)
-                        .frame(width: 120, height: 29, alignment: .leading)
-                        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 6))
                 }
                 Spacer()
                 Button("刷新分支") {

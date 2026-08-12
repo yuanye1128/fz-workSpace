@@ -17,6 +17,8 @@ final class JobCoordinator {
         repository: RepositoryConfig,
         branch: String,
         provider: AIProvider,
+        modelID: String?,
+        reasoningEffort: String?,
         helperContext: String
     ) async {
         guard appState.activeWorkItem(for: ticket.id) == nil else { return }
@@ -24,6 +26,8 @@ final class JobCoordinator {
         let item = WorkItem(
             ticketID: ticket.id,
             provider: provider,
+            modelID: modelID,
+            reasoningEffort: reasoningEffort,
             repositoryPath: repository.path,
             branch: branch,
             helperContext: helperContext,
@@ -54,6 +58,8 @@ final class JobCoordinator {
             do {
                 let execution = try await aiService.run(
                     provider: item.provider,
+                    modelID: item.modelID,
+                    reasoningEffort: item.reasoningEffort,
                     ticket: ticket,
                     repositoryPath: item.repositoryPath,
                     helperContext: item.helperContext,
@@ -99,10 +105,12 @@ final class JobCoordinator {
                 try await gitService.checkoutBranch(item.branch, at: repository.path)
                 append("已切换到分支：\(item.branch)", to: item.id)
                 setStage(.analyzing, for: item.id)
-                append("正在使用 \(item.provider.rawValue) 分析问题和生成修改方案", to: item.id)
+                append("正在使用 \(providerDescription(for: item)) 分析问题和生成修改方案", to: item.id)
 
                 let execution = try await aiService.run(
                     provider: item.provider,
+                    modelID: item.modelID,
+                    reasoningEffort: item.reasoningEffort,
                     ticket: ticket,
                     repositoryPath: repository.path,
                     helperContext: item.helperContext,
@@ -310,6 +318,17 @@ final class JobCoordinator {
 
     private func item(id: UUID) -> WorkItem? {
         appState.workItems.first { $0.id == id }
+    }
+
+    private func providerDescription(for item: WorkItem) -> String {
+        var parts = [item.provider.rawValue]
+        if let modelID = item.modelID, !modelID.isEmpty {
+            parts.append(modelID)
+        }
+        if let effort = item.reasoningEffort, !effort.isEmpty {
+            parts.append(AIReasoningEffort.displayName(for: effort))
+        }
+        return parts.joined(separator: " · ")
     }
 
     private func expectedPhase(for stage: JobStage) -> AIExecutionPhase? {

@@ -158,26 +158,27 @@ struct TicketBoardView: View {
                 .fixedSize(horizontal: true, vertical: false)
                 .focusable(false)
 
-                Button {
-                    appState.presentNewTicketNotifications()
-                } label: {
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: "bell")
-                            .font(.system(size: 16, weight: .medium))
-                            .frame(width: 34, height: 34)
+                if !appState.newTicketNotifications.isEmpty {
+                    Button {
+                        appState.presentNewTicketNotifications()
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "bell")
+                                .font(.system(size: 16, weight: .medium))
+                                .frame(width: 34, height: 34)
 
-                        if appState.hasUnreadNewTickets {
-                            Circle()
-                                .fill(Color.red)
-                                .frame(width: 8, height: 8)
-                                .offset(x: 3, y: 3)
+                            if appState.hasUnreadNewTickets {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 8, height: 8)
+                                    .offset(x: 3, y: 3)
+                            }
                         }
                     }
-                }
-                .buttonStyle(.plain)
-                .disabled(appState.newTicketNotifications.isEmpty)
-                .popover(isPresented: $appState.showingNewTicketsPopover, arrowEdge: .top) {
-                    NewTicketNotificationsPopover(tickets: appState.newTicketNotifications)
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $appState.showingNewTicketsPopover, arrowEdge: .top) {
+                        NewTicketNotificationsPopover(tickets: appState.newTicketNotifications)
+                    }
                 }
 
                 Menu {

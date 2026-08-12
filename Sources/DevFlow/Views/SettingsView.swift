@@ -15,7 +15,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("设置")
                         .font(.system(size: 25, weight: .bold))
-                    Text("配置知识库、AI 工具、主题和交付默认值")
+                    Text("配置知识库、AI 工具和主题")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                 }
@@ -88,18 +88,6 @@ struct SettingsView: View {
                     ToolStatusRow(name: "Cursor", command: "cursor-agent")
                     Divider()
                     ToolStatusRow(name: "Claude Code", command: "claude")
-                }
-
-                settingsSection("交付默认值") {
-                    LabeledContent("默认测试负责人") {
-                        TextField("姓名或用户 ID", text: $appState.defaultTestAssignee)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 260)
-                            .onSubmit { appState.persistState() }
-                    }
-                    Text("代码 push 成功后，应用会在最终确认时使用或覆盖此默认值。")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
                 }
             }
             .padding(28)
