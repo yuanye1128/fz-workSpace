@@ -121,7 +121,73 @@ final class DevFlowTests: XCTestCase {
         XCTAssertTrue(prompt.contains("绝对不要修改、创建或删除任何文件"))
         XCTAssertTrue(prompt.contains("DEVFLOW_ROOT_CAUSE:"))
         XCTAssertTrue(prompt.contains("DEVFLOW_PLAN:"))
+        XCTAssertTrue(prompt.contains("非交互流水线"))
         XCTAssertTrue(JobStage.awaitingPlanApproval.requiresUserApproval)
+    }
+
+    func testProtocolMarkerGateRejectsProgressOnlyOutput() {
+        let progress = "先按工单定位相关代码\n继续核对帖子详情跳转门槛"
+        XCTAssertFalse(PromptBuilder.hasRequiredProtocolMarkers(progress, phase: .analysis))
+        XCTAssertFalse(PromptBuilder.hasRequiredProtocolMarkers(progress, phase: .modification))
+
+        let analysis = """
+        DEVFLOW_ROOT_CAUSE:
+        瀑布流正文未绑定点击回调
+        DEVFLOW_PLAN:
+        1. 在 CirclePostGridPage 绑定 onTapContent
+        DEVFLOW_RISKS:
+        - 需回归标题与封面点击
+        """
+        XCTAssertTrue(PromptBuilder.hasRequiredProtocolMarkers(analysis, phase: .analysis))
+        XCTAssertEqual(
+            PromptBuilder.extractProtocolBlock(from: "前言\n\(analysis)", phase: .analysis)?.hasPrefix("DEVFLOW_ROOT_CAUSE:"),
+            true
+        )
+
+        let modification = """
+        DEVFLOW_SUMMARY:
+        绑定了正文点击跳转
+        DEVFLOW_REASONING:
+        空 GestureDetector 吞掉了点击
+        DEVFLOW_TESTS:
+        - 未执行自动化，建议手工点封面标题正文
+        DEVFLOW_RISKS:
+        - 未发现明显额外风险
+        """
+        XCTAssertTrue(PromptBuilder.hasRequiredProtocolMarkers(modification, phase: .modification))
+    }
+
+    func testProtocolMarkerGateRejectsPromptTemplateEcho() {
+        let promptEcho = PromptBuilder.buildAnalysis(ticket: SampleData.tickets[3], helperContext: "")
+        XCTAssertFalse(PromptBuilder.hasRequiredProtocolMarkers(promptEcho, phase: .analysis))
+
+        let rawLogEcho = """
+        DEVFLOW_ROOT_CAUSE:
+        <根因>
+        DEVFLOW_PLAN:
+        1. <修改步骤>
+        DEVFLOW_RISKS:
+        - <风险>
+        {"type":"thinking","subtype":"delta","text":"x","session_id":"abc"}
+        """
+        XCTAssertFalse(PromptBuilder.hasRequiredProtocolMarkers(rawLogEcho, phase: .analysis))
+        XCTAssertTrue(PromptBuilder.isProtocolTemplateEcho(rawLogEcho))
+    }
+
+    func testWrapCursorPlanAsAnalysisProtocolPassesGate() {
+        let markdown = """
+        # 修复点击无法跳转
+
+        ## 根因
+        正文区域 GestureDetector 吞掉点击。
+
+        ## 修改步骤
+        1. 绑定 onTapContent
+        2. 修正 onTapTitle
+        """
+        let wrapped = PromptBuilder.wrapCursorPlanAsAnalysisProtocol(markdown)
+        XCTAssertTrue(PromptBuilder.hasRequiredProtocolMarkers(wrapped, phase: .analysis))
+        XCTAssertTrue(wrapped.contains("绑定 onTapContent"))
     }
 
     func testReportParserKeepsChangedFilesAndSections() {

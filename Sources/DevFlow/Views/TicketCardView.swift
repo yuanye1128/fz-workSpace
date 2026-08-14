@@ -101,7 +101,7 @@ struct TicketCardView: View {
                         }
                         .buttonStyle(CardActionButtonStyle())
                     } else {
-                        Button("去解决") {
+                        Button(ticket.kind.prefersExternalAgentClient ? "去处理" : "去解决") {
                             appState.open(ticket: ticket, focusSolve: true)
                         }
                         .buttonStyle(CardActionButtonStyle())
@@ -206,7 +206,7 @@ struct TicketListRow: View {
                     }
                     .buttonStyle(CardActionButtonStyle())
                 } else {
-                    Button("去解决") {
+                    Button(ticket.kind.prefersExternalAgentClient ? "去处理" : "去解决") {
                         appState.open(ticket: ticket, focusSolve: true)
                     }
                     .buttonStyle(CardActionButtonStyle())

@@ -9,6 +9,16 @@ enum TicketKind: String, Codable, CaseIterable, Identifiable {
     case task = "任务"
 
     var id: String { rawValue }
+
+    /// 需求/任务更适合在外部 Agent 客户端多轮沟通；其余类型走 App 内自动修复流水线。
+    var prefersExternalAgentClient: Bool {
+        switch self {
+        case .feature, .task:
+            true
+        case .bug, .suggestion, .support:
+            false
+        }
+    }
 }
 
 enum TicketPriority: String, Codable, CaseIterable, Identifiable {
@@ -90,6 +100,26 @@ struct Ticket: Identifiable, Codable, Hashable {
 
     var normalizedAuthor: String {
         author?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    /// 规范提交信息：fix/update: #工单号 中文简述
+    func suggestedCommitMessage(summary: String?) -> String {
+        let prefix: String
+        switch kind {
+        case .bug, .support: prefix = "fix"
+        case .feature, .task, .suggestion: prefix = "update"
+        }
+
+        let raw = (summary?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+            ?? title
+        let firstLine = raw
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty && !$0.hasPrefix("DEVFLOW_") }
+            ?? title
+        let cleaned = String(firstLine.prefix(72))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return "\(prefix): \(issueNumber) \(cleaned)"
     }
 }
 

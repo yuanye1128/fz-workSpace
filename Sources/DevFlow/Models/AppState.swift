@@ -212,6 +212,8 @@ final class AppState: ObservableObject {
 
     func destinationCount(_ destination: SidebarDestination) -> Int? {
         switch destination {
+        case .all:
+            tickets.count
         case .processing:
             tickets.filter { isInProcessingList($0) }.count
         case .approval:

@@ -90,7 +90,8 @@ struct SidebarView: View {
                     .font(.system(size: 14, weight: selected ? .semibold : .medium))
                     .lineLimit(1)
                 Spacer()
-                if let count = appState.destinationCount(destination), count > 0 {
+                if let count = appState.destinationCount(destination),
+                   destination == .all || count > 0 {
                     CountBadge(count: count)
                 }
             }

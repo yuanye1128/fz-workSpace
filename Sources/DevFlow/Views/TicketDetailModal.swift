@@ -17,9 +17,14 @@ struct TicketDetailModal: View {
     @State private var helperContext = ""
     @State private var showingCloseConfirmation = false
     @State private var isDroppingHelperFiles = false
+    @State private var externalLaunchError: String?
     @FocusState private var focusedField: Field?
 
     let ticket: Ticket
+
+    /// 仓库/模型 左列固定宽度，保证「当前分支」与「思考强度」竖向对齐
+    private static let solveConfigPrimaryColumnWidth: CGFloat = 220
+    private static let solveConfigColumnSpacing: CGFloat = 30
 
     private enum Field { case helper }
 
@@ -51,6 +56,10 @@ struct TicketDetailModal: View {
             return selectedModel.reasoningLevels.contains(selectedReasoningEffort) ? selectedReasoningEffort : nil
         }
         return availableModels.isEmpty ? selectedReasoningEffort : nil
+    }
+
+    private var prefersExternalAgent: Bool {
+        ticket.kind.prefersExternalAgentClient
     }
 
     private var workItem: WorkItem? {
@@ -114,6 +123,14 @@ struct TicketDetailModal: View {
         } message: {
             Text(closeConfirmationMessage)
         }
+        .alert("打开客户端失败", isPresented: Binding(
+            get: { externalLaunchError != nil },
+            set: { if !$0 { externalLaunchError = nil } }
+        )) {
+            Button("知道了", role: .cancel) { externalLaunchError = nil }
+        } message: {
+            Text(externalLaunchError ?? "")
+        }
     }
 
     private var header: some View {
@@ -173,8 +190,9 @@ struct TicketDetailModal: View {
                         workflowStrip
                     }
                     .padding(25)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(width: 420)
+                .frame(maxWidth: .infinity)
                 .onChange(of: appState.focusSolveConfiguration) { shouldFocus in
                     if shouldFocus {
                         withAnimation { proxy.scrollTo("solve-config", anchor: .top) }
@@ -236,7 +254,7 @@ struct TicketDetailModal: View {
     }
 
     private var repositoryAndBranchRow: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: Self.solveConfigColumnSpacing) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("选择代码仓库")
                     .font(.system(size: 12, weight: .semibold))
@@ -248,7 +266,6 @@ struct TicketDetailModal: View {
                         HStack(spacing: 6) {
                             Image(systemName: "folder.badge.plus")
                             Text("尚未配置仓库，前往添加")
-                            Spacer(minLength: 0)
                             Image(systemName: "chevron.right")
                         }
                         .font(.system(size: 12, weight: .medium))
@@ -266,14 +283,15 @@ struct TicketDetailModal: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
+                    .fixedSize()
                     .onChange(of: selectedRepositoryID) { _ in
                         Task { await loadCurrentBranch() }
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: Self.solveConfigPrimaryColumnWidth, alignment: .leading)
 
-            VStack(alignment: .trailing, spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text("当前分支")
                     .font(.system(size: 12, weight: .semibold))
                 currentBranchDisplay
@@ -298,14 +316,22 @@ struct TicketDetailModal: View {
                     .truncationMode(.middle)
             }
         }
+        .padding(.horizontal, 10)
+        .frame(height: 26)
+        .background(Color.primary.opacity(0.055), in: Capsule())
         .help(branch.isEmpty ? "选择仓库后显示当前分支" : branch)
     }
 
     private var providerPicker: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("AI 工具")
+            Text(prefersExternalAgent ? "打开到客户端" : "AI 工具")
                 .font(.system(size: 12, weight: .semibold))
-            Picker("AI 工具", selection: $provider) {
+            if prefersExternalAgent {
+                Text("需求适合多轮沟通，将携带工单上下文打开所选客户端。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            Picker(prefersExternalAgent ? "打开到客户端" : "AI 工具", selection: $provider) {
                 ForEach(AIProvider.allCases) { provider in
                     Text(provider.rawValue).tag(provider)
                 }
@@ -313,7 +339,7 @@ struct TicketDetailModal: View {
             .labelsHidden()
             .pickerStyle(.segmented)
 
-            if provider != .cursor {
+            if !prefersExternalAgent, provider != .cursor {
                 if isLoadingModels {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
@@ -342,7 +368,7 @@ struct TicketDetailModal: View {
     }
 
     private var modelAndEffortRow: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: Self.solveConfigColumnSpacing) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("模型")
                     .font(.system(size: 11, weight: .medium))
@@ -355,15 +381,17 @@ struct TicketDetailModal: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
+                    .fixedSize()
                 } else {
                     TextField("例如 gpt-5.6-sol", text: $customModelID)
                         .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: Self.solveConfigPrimaryColumnWidth, alignment: .leading)
 
             if showsReasoningPicker {
-                VStack(alignment: .trailing, spacing: 6) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text("思考强度")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
@@ -374,8 +402,8 @@ struct TicketDetailModal: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
+                    .fixedSize()
                 }
-                .fixedSize(horizontal: true, vertical: false)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -385,9 +413,11 @@ struct TicketDetailModal: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("辅助 AI 定位")
+                    Text(prefersExternalAgent ? "补充上下文" : "辅助 AI 定位")
                         .font(.system(size: 14, weight: .semibold))
-                    Text("补充模块、文件路径或技术约束，帮助 AI 更快找准代码位置")
+                    Text(prefersExternalAgent
+                         ? "可补充模块、文件路径或约束，会一并带入外部客户端"
+                         : "补充模块、文件路径或技术约束，帮助 AI 更快找准代码位置")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -480,20 +510,27 @@ struct TicketDetailModal: View {
         VStack(spacing: 10) {
             Button {
                 guard let selectedRepository else { return }
-                Task {
-                    await appState.jobCoordinator.start(
-                        ticket: ticket,
-                        repository: selectedRepository,
-                        branch: branch,
-                        provider: provider,
-                        modelID: effectiveModelID,
-                        reasoningEffort: effectiveReasoningEffort,
-                        helperContext: helperContext
-                    )
+                if prefersExternalAgent {
+                    openInExternalAgent(repository: selectedRepository)
+                } else {
+                    Task {
+                        await appState.jobCoordinator.start(
+                            ticket: ticket,
+                            repository: selectedRepository,
+                            branch: branch,
+                            provider: provider,
+                            modelID: effectiveModelID,
+                            reasoningEffort: effectiveReasoningEffort,
+                            helperContext: helperContext
+                        )
+                    }
                 }
             } label: {
-                Label("开始解决", systemImage: "play.circle.fill")
-                    .frame(maxWidth: .infinity)
+                Label(
+                    prefersExternalAgent ? "在 \(provider.rawValue) 中打开" : "开始解决",
+                    systemImage: prefersExternalAgent ? "arrow.up.forward.app.fill" : "play.circle.fill"
+                )
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(PrimaryButtonStyle())
             .disabled(selectedRepository == nil || branch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -511,10 +548,44 @@ struct TicketDetailModal: View {
 
     private var workflowStrip: some View {
         VStack(alignment: .leading, spacing: 11) {
-            SectionLabel(title: "AI 解决流程")
-            JobStageStrip(current: .preparing)
+            if prefersExternalAgent {
+                SectionLabel(title: "外部客户端处理")
+                Text("需求/任务工单会写入 `.devflow/current-task.md` 并打开所选客户端，便于多轮沟通。启动提示已复制到剪贴板。")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                SectionLabel(title: "AI 解决流程")
+                JobStageStrip(current: .preparing)
+            }
         }
         .padding(.top, 5)
+    }
+
+    private func openInExternalAgent(repository: RepositoryConfig) {
+        Task {
+            do {
+                if !branch.isEmpty {
+                    try await GitService().checkoutBranch(branch, at: repository.path)
+                }
+                _ = try ExternalAgentLauncher.launch(
+                    .init(
+                        ticket: ticket,
+                        repositoryPath: repository.path,
+                        branch: branch,
+                        helperContext: helperContext,
+                        provider: provider
+                    )
+                )
+                await MainActor.run {
+                    appState.closeTicketModal()
+                }
+            } catch {
+                await MainActor.run {
+                    externalLaunchError = error.localizedDescription
+                }
+            }
+        }
     }
 
     private func configureDefaults() {
@@ -587,6 +658,9 @@ private struct WorkItemContent: View {
     let ticket: Ticket
     let item: WorkItem
 
+    /// 用户点击步骤条回看时的步骤；nil 表示跟随当前真实阶段
+    @State private var reviewedStepIndex: Int?
+
     private var visibleLogs: [JobLogEntry] {
         item.logs.filter { entry in
             !entry.message.contains("正在调用工具")
@@ -595,74 +669,208 @@ private struct WorkItemContent: View {
         }
     }
 
+    private var liveStepIndex: Int {
+        JobStageStrip.stepIndex(for: item.stage) ?? 0
+    }
+
+    private var activeStepIndex: Int {
+        min(reviewedStepIndex ?? liveStepIndex, liveStepIndex)
+    }
+
+    private var hasValidAnalysisPlan: Bool {
+        PromptBuilder.hasRequiredProtocolMarkers(item.analysisPlan ?? "", phase: .analysis)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            if item.stage == .awaitingPlanApproval, let analysisPlan = item.analysisPlan {
-                AIAnalysisPlanView(ticket: ticket, item: item, plan: analysisPlan)
-            } else if let report = item.report, [.awaitingApproval, .reviewing, .partial, .completed].contains(item.stage) {
-                AIReportView(ticket: ticket, item: item, report: report)
-            } else {
-                progressContent
+            workflowHeader
+
+            Group {
+                switch activeStepIndex {
+                case 0:
+                    analysisStepContent
+                case 1:
+                    planStepContent
+                case 2:
+                    codingStepContent
+                case 3:
+                    reportStepContent
+                case 4:
+                    deliveryStepContent
+                default:
+                    progressBody(includeWorkflowStrip: false)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onChange(of: item.stage) { _ in
+            reviewedStepIndex = nil
         }
     }
 
-    private var progressContent: some View {
-        VStack(spacing: 20) {
-            HStack(spacing: 16) {
-                if item.stage == .failed || item.stage == .interrupted {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 27))
-                        .foregroundStyle(item.stage == .interrupted ? DevFlowTheme.warning : DevFlowTheme.danger)
-                } else {
-                    ProgressView().controlSize(.large)
+    @ViewBuilder
+    private var reportStepContent: some View {
+        if let report = item.report,
+           [.awaitingApproval, .reviewing].contains(item.stage) || reviewedStepIndex == 3 {
+            AIReportView(ticket: ticket, item: item, report: report, showsWorkflowStrip: false)
+        } else {
+            progressBody(includeWorkflowStrip: false)
+        }
+    }
+
+    @ViewBuilder
+    private var codingStepContent: some View {
+        let codingFinished = (JobStageStrip.stepIndex(for: item.stage) ?? 0) > 2
+            || [.completed, .partial, .cancelled].contains(item.stage)
+        if item.stage == .runningAI {
+            progressBody(includeWorkflowStrip: false)
+        } else if codingFinished {
+            progressBody(
+                includeWorkflowStrip: false,
+                title: "AI 编码已完成",
+                subtitle: "该阶段已结束，可回看下方执行日志"
+            )
+        } else {
+            progressBody(includeWorkflowStrip: false)
+        }
+    }
+
+    private var deliveryStepContent: some View {
+        DeliveryStatusView(ticket: ticket, item: item)
+    }
+
+    private var workflowHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel(title: "AI 解决流程")
+            JobStageStrip(
+                current: item.stage,
+                selectedIndex: activeStepIndex,
+                onSelect: { index in
+                    guard index <= liveStepIndex else { return }
+                    reviewedStepIndex = index
                 }
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(item.stage.rawValue)
-                        .font(.system(size: 18, weight: .semibold))
-                    Text(progressMessage)
+            )
+        }
+        .padding(.horizontal, 25)
+        .padding(.vertical, 13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var analysisStepContent: some View {
+        if item.stage == .analyzing || item.stage == .preparing {
+            progressBody(includeWorkflowStrip: false)
+        } else if hasValidAnalysisPlan, let plan = item.analysisPlan {
+            analysisPlanScroll(plan: plan, title: "分析结果", subtitle: "只读回看分析阶段产出的方案")
+        } else {
+            progressBody(includeWorkflowStrip: false)
+        }
+    }
+
+    @ViewBuilder
+    private var planStepContent: some View {
+        if item.stage == .awaitingPlanApproval {
+            if hasValidAnalysisPlan, let plan = item.analysisPlan {
+                AIAnalysisPlanView(ticket: ticket, item: item, plan: plan, showsWorkflowStrip: false)
+            } else {
+                invalidPlanContent
+            }
+        } else if hasValidAnalysisPlan, let plan = item.analysisPlan {
+            analysisPlanScroll(plan: plan, title: "已确认的修改方案", subtitle: "当前流程已越过确认方案，以下为当时确认的内容")
+        } else {
+            progressBody(includeWorkflowStrip: false)
+        }
+    }
+
+    private var invalidPlanContent: some View {
+        VStack(spacing: 18) {
+            HStack(spacing: 14) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 26))
+                    .foregroundStyle(DevFlowTheme.danger)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("分析未产出有效方案")
+                        .font(.system(size: 17, weight: .semibold))
+                    Text("模型未按协议输出完整 DEVFLOW 方案（或把提示模板误当成结果）。请返回配置后重试分析。")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
             }
 
-            JobStageStrip(current: item.stage)
+            VStack(alignment: .leading, spacing: 10) {
+                SectionLabel(title: "执行日志")
+                logsScroll(maxHeight: 280)
+            }
+
+            HStack {
+                Button("返回配置") {
+                    appState.jobCoordinator.requestRevision(itemID: item.id)
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                Spacer()
+            }
+        }
+        .padding(25)
+    }
+
+    private func analysisPlanScroll(plan: String, title: String, subtitle: String) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 17, weight: .semibold))
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 25)
+            .padding(.vertical, 16)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    SectionLabel(title: "AI 分析与建议修改方案")
+                    Text(plan)
+                        .font(.system(size: 13))
+                        .lineSpacing(5)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(25)
+            }
+            .background(colorScheme == .dark ? Color.black.opacity(0.12) : Color.clear)
+        }
+    }
+
+    private func progressBody(
+        includeWorkflowStrip: Bool,
+        title: String? = nil,
+        subtitle: String? = nil
+    ) -> some View {
+        VStack(spacing: 16) {
+            HStack(spacing: 14) {
+                progressStatusIcon
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(title ?? item.stage.rawValue)
+                        .font(.system(size: 18, weight: .semibold))
+                    Text(subtitle ?? progressMessage)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            if includeWorkflowStrip {
+                JobStageStrip(current: item.stage)
+            }
 
             VStack(alignment: .leading, spacing: 10) {
                 SectionLabel(title: "执行日志")
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 7) {
-                            ForEach(visibleLogs) { entry in
-                                HStack(alignment: .top, spacing: 9) {
-                                    Text(entry.timestamp.formatted(date: .omitted, time: .standard))
-                                        .foregroundStyle(.secondary)
-                                    Text(entry.message)
-                                        .foregroundStyle(entry.level == "error" ? DevFlowTheme.danger : .primary)
-                                    Spacer()
-                                }
-                                .font(.system(size: 11, design: .monospaced))
-                                .textSelection(.enabled)
-                            }
-                            Color.clear
-                                .frame(height: 1)
-                                .id("latest-log")
-                        }
-                        .padding(13)
-                    }
-                    .onAppear {
-                        proxy.scrollTo("latest-log", anchor: .bottom)
-                    }
-                    .onChange(of: visibleLogs.count) { _ in
-                        withAnimation(.easeOut(duration: 0.16)) {
-                            proxy.scrollTo("latest-log", anchor: .bottom)
-                        }
-                    }
-                }
-                .frame(maxHeight: 340)
-                .background(Color.black.opacity(colorScheme == .dark ? 0.25 : 0.035), in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(DevFlowTheme.border(colorScheme)))
+                logsScroll(maxHeight: 340)
             }
 
             HStack {
@@ -690,7 +898,66 @@ private struct WorkItemContent: View {
                 }
             }
         }
-        .padding(25)
+        .padding(.horizontal, 25)
+        .padding(.top, 12)
+        .padding(.bottom, 25)
+    }
+
+    @ViewBuilder
+    private var progressStatusIcon: some View {
+        switch item.stage {
+        case .failed, .interrupted:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 27))
+                .foregroundStyle(item.stage == .interrupted ? DevFlowTheme.warning : DevFlowTheme.danger)
+        case .completed, .cancelled, .partial:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 27))
+                .foregroundStyle(DevFlowTheme.success)
+        case .preparing, .analyzing, .runningAI, .reviewing,
+             .committing, .pulling, .pushing, .updatingTicket:
+            ProgressView().controlSize(.large)
+        default:
+            // awaitingApproval / awaitingPlanApproval 等回看时不应再转圈
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 27))
+                .foregroundStyle(DevFlowTheme.success)
+        }
+    }
+
+    private func logsScroll(maxHeight: CGFloat) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 7) {
+                    ForEach(visibleLogs) { entry in
+                        HStack(alignment: .top, spacing: 9) {
+                            Text(entry.timestamp.formatted(date: .omitted, time: .standard))
+                                .foregroundStyle(.secondary)
+                            Text(entry.message)
+                                .foregroundStyle(entry.level == "error" ? DevFlowTheme.danger : .primary)
+                            Spacer()
+                        }
+                        .font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled)
+                    }
+                    Color.clear
+                        .frame(height: 1)
+                        .id("latest-log")
+                }
+                .padding(13)
+            }
+            .onAppear {
+                proxy.scrollTo("latest-log", anchor: .bottom)
+            }
+            .onChange(of: visibleLogs.count) { _ in
+                withAnimation(.easeOut(duration: 0.16)) {
+                    proxy.scrollTo("latest-log", anchor: .bottom)
+                }
+            }
+        }
+        .frame(maxHeight: maxHeight)
+        .background(Color.black.opacity(colorScheme == .dark ? 0.25 : 0.035), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(DevFlowTheme.border(colorScheme)))
     }
 
     private var progressMessage: String {
@@ -714,6 +981,10 @@ private struct AIAnalysisPlanView: View {
     let ticket: Ticket
     let item: WorkItem
     let plan: String
+    var showsWorkflowStrip: Bool = true
+
+    @State private var supplementNote = ""
+    @FocusState private var isSupplementFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -721,7 +992,7 @@ private struct AIAnalysisPlanView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("分析结果与修改方案")
                         .font(.system(size: 17, weight: .semibold))
-                    Text("确认后 AI 才会开始修改本地代码")
+                    Text("可补充说明后继续沟通，或确认后开始修改代码")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -733,14 +1004,16 @@ private struct AIAnalysisPlanView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                SectionLabel(title: "AI 解决流程")
-                JobStageStrip(current: item.stage)
-            }
-            .padding(.horizontal, 25)
-            .padding(.vertical, 13)
+            if showsWorkflowStrip {
+                VStack(alignment: .leading, spacing: 8) {
+                    SectionLabel(title: "AI 解决流程")
+                    JobStageStrip(current: item.stage)
+                }
+                .padding(.horizontal, 25)
+                .padding(.vertical, 13)
 
-            Divider()
+                Divider()
+            }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
@@ -754,6 +1027,32 @@ private struct AIAnalysisPlanView: View {
                 .padding(25)
             }
             .background(colorScheme == .dark ? Color.black.opacity(0.12) : Color.clear)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("继续沟通")
+                    .font(.system(size: 12, weight: .semibold))
+                HStack(alignment: .bottom, spacing: 10) {
+                    TextField("补充约束、遗漏点或希望调整的方案方向…", text: $supplementNote, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(2...4)
+                        .focused($isSupplementFocused)
+
+                    Button {
+                        let note = supplementNote
+                        supplementNote = ""
+                        isSupplementFocused = false
+                        appState.jobCoordinator.reviseAnalysisPlan(itemID: item.id, userNote: note)
+                    } label: {
+                        Label("发送并更新方案", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .disabled(supplementNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding(.horizontal, 25)
+            .padding(.vertical, 12)
 
             Divider()
 
@@ -778,54 +1077,83 @@ private struct AIAnalysisPlanView: View {
 
 struct JobStageStrip: View {
     let current: JobStage
+    var selectedIndex: Int? = nil
+    var onSelect: ((Int) -> Void)? = nil
+
     private let steps = [
         WorkflowStep(title: "分析", symbol: "magnifyingglass"),
         WorkflowStep(title: "确认方案", symbol: "person.badge.shield.checkmark"),
         WorkflowStep(title: "AI 编码", symbol: "wand.and.stars"),
         WorkflowStep(title: "报告确认", symbol: "doc.text.magnifyingglass"),
-        WorkflowStep(title: "代码提交", symbol: "arrow.up.circle"),
-        WorkflowStep(title: "待测试", symbol: "checkmark.seal")
+        WorkflowStep(title: "已完成", symbol: "checkmark.seal.fill")
     ]
+
+    static func stepIndex(for stage: JobStage) -> Int? {
+        switch stage {
+        case .analyzing: 0
+        case .awaitingPlanApproval: 1
+        case .runningAI: 2
+        case .reviewing, .awaitingApproval: 3
+        case .committing, .pulling, .pushing, .updatingTicket, .partial, .completed: 4
+        case .preparing, .interrupted, .failed, .cancelled: nil
+        }
+    }
 
     var body: some View {
         HStack(spacing: 4) {
             ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
-                VStack(spacing: 7) {
+                let reachable = (reachedStepIndex.map { index <= $0 } ?? false)
+                let isSelected = (selectedIndex ?? reachedStepIndex) == index
+                let chip = VStack(spacing: 4) {
                     Image(systemName: step.symbol)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 17, weight: .semibold))
                     Text(step.title)
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
                         .lineLimit(1)
                 }
-                .foregroundStyle(stepColor(index))
-                .frame(maxWidth: .infinity)
+                .foregroundStyle(stepColor(index, selected: isSelected, reachable: reachable))
+                .padding(.horizontal, 30)
+                .padding(.vertical, 15)
+                .background(
+                    isSelected && onSelect != nil
+                        ? DevFlowTheme.accent.opacity(0.10)
+                        : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                )
+                .contentShape(Rectangle())
+                .opacity(onSelect == nil || reachable ? 1 : 0.45)
+
+                if let onSelect, reachable {
+                    Button {
+                        onSelect(index)
+                    } label: {
+                        chip
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                } else {
+                    chip
+                        .frame(maxWidth: .infinity)
+                }
+
                 if index < steps.count - 1 {
                     Rectangle()
-                        .fill(stepColor(index).opacity(0.35))
+                        .fill(stepColor(index, selected: false, reachable: reachable).opacity(0.35))
                         .frame(width: 12, height: 1)
-                        .offset(y: -12)
                 }
             }
         }
     }
 
-    private func stepColor(_ index: Int) -> Color {
-        guard let reachedIndex = reachedStepIndex else {
-            return .secondary
-        }
-        return index <= reachedIndex ? DevFlowTheme.accent : .secondary
+    private func stepColor(_ index: Int, selected: Bool, reachable: Bool) -> Color {
+        if selected { return DevFlowTheme.accent }
+        guard let reachedIndex = reachedStepIndex else { return .secondary }
+        if index <= reachedIndex { return DevFlowTheme.accent.opacity(reachable ? 0.85 : 0.55) }
+        return .secondary
     }
 
     private var reachedStepIndex: Int? {
-        switch current {
-        case .analyzing: 0
-        case .awaitingPlanApproval: 1
-        case .runningAI: 2
-        case .reviewing, .awaitingApproval: 3
-        case .committing, .pulling, .pushing, .partial: 4
-        case .updatingTicket, .completed: 5
-        case .preparing, .interrupted, .failed, .cancelled: nil
-        }
+        Self.stepIndex(for: current)
     }
 
     private struct WorkflowStep: Identifiable {
@@ -834,4 +1162,282 @@ struct JobStageStrip: View {
 
         var id: String { title }
     }
+}
+
+/// 收尾交付页：展示代码提交与工单状态。
+private struct DeliveryStatusView: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.colorScheme) private var colorScheme
+    let ticket: Ticket
+    let item: WorkItem
+
+    @State private var assignee = ""
+    @State private var transferToAuthor = true
+
+    private var isMissingRequiredAuthor: Bool {
+        transferToAuthor
+            && ticket.requiresAuthorReassignment
+            && ticket.sourceURL != nil
+            && ticket.normalizedAuthor.isEmpty
+    }
+
+    private var commitDone: Bool {
+        item.commitHash != nil
+            || item.logs.contains { $0.message.contains("本地 commit 完成") }
+            || [.pulling, .pushing, .updatingTicket, .partial, .completed].contains(item.stage)
+    }
+
+    private var pushDone: Bool {
+        item.logs.contains { $0.message.contains("代码 push 成功") }
+            || [.updatingTicket, .partial, .completed].contains(item.stage)
+    }
+
+    private var ticketDone: Bool {
+        item.stage == .completed
+            || item.logs.contains { $0.message.contains("工单已转为待测试") || $0.message.contains("交付流程已完成") }
+    }
+
+    private var headline: (title: String, subtitle: String, color: Color, symbol: String) {
+        switch item.stage {
+        case .completed:
+            ("交付已完成", "代码已提交，工单已进入待测试", DevFlowTheme.success, "checkmark.seal.fill")
+        case .partial:
+            ("代码已提交，工单待更新", item.errorMessage ?? "工单状态更新失败，可重试", DevFlowTheme.warning, "exclamationmark.triangle.fill")
+        case .committing:
+            ("正在提交代码", "创建本地 commit…", DevFlowTheme.accent, "arrow.up.circle")
+        case .pulling:
+            ("正在提交代码", "拉取远程最新代码…", DevFlowTheme.accent, "arrow.down.circle")
+        case .pushing:
+            ("正在提交代码", "Push 到远程仓库…", DevFlowTheme.accent, "icloud.and.arrow.up")
+        case .updatingTicket:
+            ("正在更新工单", "转为待测试并处理负责人…", DevFlowTheme.accent, "ticket")
+        default:
+            ("收尾交付", item.stage.rawValue, .secondary, "flag.checkered")
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                headlineBanner
+
+                statusCard(
+                    title: "代码提交",
+                    rows: [
+                        .init(
+                            title: "本地 Commit",
+                            detail: item.commitHash.map { String($0.prefix(8)) } ?? (commitDone ? "已完成" : "等待中"),
+                            state: commitDone ? .done : (item.stage == .committing ? .running : .pending)
+                        ),
+                        .init(
+                            title: "Push 远程",
+                            detail: pushDone ? "已推送 \(item.branch)" : (item.stage == .pushing ? "推送中…" : (item.stage == .pulling ? "拉取中…" : "等待中")),
+                            state: pushDone ? .done : ([.pulling, .pushing].contains(item.stage) ? .running : .pending)
+                        )
+                    ]
+                )
+
+                statusCard(
+                    title: "工单状态",
+                    rows: [
+                        .init(
+                            title: "知识库工单",
+                            detail: ticketStatusDetail,
+                            state: ticketStatusState
+                        )
+                    ]
+                )
+
+                if item.stage == .partial {
+                    retryBar
+                }
+
+                if item.stage == .completed || item.stage == .partial {
+                    recentLogs
+                }
+            }
+            .padding(25)
+        }
+        .onAppear {
+            assignee = appState.defaultTestAssignee
+        }
+    }
+
+    private var headlineBanner: some View {
+        let info = headline
+        return HStack(spacing: 16) {
+            Image(systemName: info.symbol)
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundStyle(info.color)
+                .frame(width: 56, height: 56)
+                .background(info.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(info.title)
+                    .font(.system(size: item.stage == .completed ? 26 : 20, weight: .bold))
+                    .foregroundStyle(item.stage == .completed ? DevFlowTheme.success : .primary)
+                Text(info.subtitle)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+            Spacer(minLength: 0)
+            if [.committing, .pulling, .pushing, .updatingTicket].contains(item.stage) {
+                ProgressView().controlSize(.regular)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            (item.stage == .completed ? DevFlowTheme.success.opacity(0.10) : DevFlowTheme.accent.opacity(0.06)),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(item.stage == .completed ? DevFlowTheme.success.opacity(0.35) : DevFlowTheme.border(colorScheme))
+        )
+    }
+
+    private var ticketStatusDetail: String {
+        if ticketDone {
+            if let log = item.logs.last(where: { $0.message.contains("工单已转为待测试") || $0.message.contains("交付流程已完成") }) {
+                return log.message
+            }
+            return "已转为待测试"
+        }
+        if item.stage == .partial {
+            return item.errorMessage ?? "更新失败"
+        }
+        if item.stage == .updatingTicket {
+            return "正在更新…"
+        }
+        if pushDone {
+            return "等待更新"
+        }
+        return "等待代码提交完成"
+    }
+
+    private var ticketStatusState: DeliveryRowState {
+        if ticketDone { return .done }
+        if item.stage == .partial { return .failed }
+        if item.stage == .updatingTicket { return .running }
+        return .pending
+    }
+
+    private func statusCard(title: String, rows: [DeliveryStatusRow]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLabel(title: title)
+            VStack(spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                    HStack(spacing: 12) {
+                        statusIcon(row.state)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(row.title)
+                                .font(.system(size: 13, weight: .semibold))
+                            Text(row.detail)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    if index < rows.count - 1 {
+                        Divider().padding(.leading, 44)
+                    }
+                }
+            }
+            .background(DevFlowTheme.surface(colorScheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(DevFlowTheme.border(colorScheme)))
+        }
+    }
+
+    private func statusIcon(_ state: DeliveryRowState) -> some View {
+        Group {
+            switch state {
+            case .done:
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(DevFlowTheme.success)
+            case .failed:
+                Image(systemName: "xmark.circle.fill").foregroundStyle(DevFlowTheme.danger)
+            case .running:
+                ProgressView().controlSize(.small)
+            case .pending:
+                Image(systemName: "circle").foregroundStyle(.tertiary)
+            }
+        }
+        .frame(width: 18, height: 18)
+    }
+
+    private var retryBar: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if ticket.requiresAuthorReassignment {
+                Toggle(isOn: $transferToAuthor) {
+                    Text(transferToAuthor
+                         ? (ticket.normalizedAuthor.isEmpty
+                            ? "重试时转交创建人"
+                            : "重试时转交创建人：\(ticket.normalizedAuthor)")
+                         : "重试时不转交创建人")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .toggleStyle(.checkbox)
+            } else if ticket.kind != .feature {
+                TextField("测试负责人", text: $assignee)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 200)
+            }
+
+            HStack {
+                Spacer()
+                Button {
+                    Task {
+                        await appState.jobCoordinator.retryTicketUpdate(
+                            itemID: item.id,
+                            manualAssignee: assignee,
+                            reassignToAuthor: transferToAuthor
+                        )
+                    }
+                } label: {
+                    Label("仅重试工单更新", systemImage: "arrow.clockwise.circle.fill")
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(isMissingRequiredAuthor)
+            }
+        }
+        .padding(14)
+        .background(DevFlowTheme.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(DevFlowTheme.warning.opacity(0.25)))
+    }
+
+    private var recentLogs: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionLabel(title: "交付日志")
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(item.logs.suffix(8)) { entry in
+                    HStack(alignment: .top, spacing: 9) {
+                        Text(entry.timestamp.formatted(date: .omitted, time: .standard))
+                            .foregroundStyle(.secondary)
+                        Text(entry.message)
+                            .foregroundStyle(entry.level == "error" ? DevFlowTheme.danger : .primary)
+                        Spacer()
+                    }
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                }
+            }
+            .padding(13)
+            .background(Color.black.opacity(colorScheme == .dark ? 0.25 : 0.035), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(DevFlowTheme.border(colorScheme)))
+        }
+    }
+}
+
+private enum DeliveryRowState {
+    case pending, running, done, failed
+}
+
+private struct DeliveryStatusRow {
+    var title: String
+    var detail: String
+    var state: DeliveryRowState
 }

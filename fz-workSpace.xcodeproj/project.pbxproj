@@ -21,6 +21,7 @@
 		877EB37E30704DA908E3133E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E7F20C4627192619E92E7E3F /* Assets.xcassets */; };
 		938CE34B44AD43ACB2B68533 /* AIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62E09025CAEDAFCFD4B8CF17 /* AIService.swift */; };
 		A1B2C3D4E5F60718293A4B5C /* AIModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F5061728394A5B6C /* AIModelCatalog.swift */; };
+		C2D3E4F5061728394A5B6C7D /* ExternalAgentLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3E4F5061728394A5B6C7D8E /* ExternalAgentLauncher.swift */; };
 		ACCA9EECD0E618E350BF91CE /* TicketDetailModal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 160A8516E70DD18EC18BE5B3 /* TicketDetailModal.swift */; };
 		B960305D1FC39DD5067D3542 /* GitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 236459CD27774F81CD0F1B70 /* GitService.swift */; };
 		BCC3E5FEEC7BA657051822A9 /* JobCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46A71C56A1967CB47D52A9F7 /* JobCoordinator.swift */; };
@@ -48,6 +49,7 @@
 		585A8EE717817A61D5E7ED81 /* TicketCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TicketCardView.swift; sourceTree = "<group>"; };
 		62E09025CAEDAFCFD4B8CF17 /* AIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIService.swift; sourceTree = "<group>"; };
 		B1C2D3E4F5061728394A5B6C /* AIModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModelCatalog.swift; sourceTree = "<group>"; };
+		D3E4F5061728394A5B6C7D8E /* ExternalAgentLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalAgentLauncher.swift; sourceTree = "<group>"; };
 		75B6ED4D742436D0DB39A518 /* DurableExecution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DurableExecution.swift; sourceTree = "<group>"; };
 		850CF8C2B758925F611A0C2C /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		8E461DEF914920E56A5734EA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -81,6 +83,7 @@
 				62E09025CAEDAFCFD4B8CF17 /* AIService.swift */,
 				B1C2D3E4F5061728394A5B6C /* AIModelCatalog.swift */,
 				75B6ED4D742436D0DB39A518 /* DurableExecution.swift */,
+				D3E4F5061728394A5B6C7D8E /* ExternalAgentLauncher.swift */,
 				236459CD27774F81CD0F1B70 /* GitService.swift */,
 				46A71C56A1967CB47D52A9F7 /* JobCoordinator.swift */,
 				388FD5D91F9BED680601D214 /* KnowledgeBaseSession.swift */,
@@ -210,6 +213,7 @@
 				CAFE767375BE554F4EF345CB /* AIReportView.swift in Sources */,
 				A1B2C3D4E5F60718293A4B5C /* AIModelCatalog.swift in Sources */,
 				938CE34B44AD43ACB2B68533 /* AIService.swift in Sources */,
+				C2D3E4F5061728394A5B6C7D /* ExternalAgentLauncher.swift in Sources */,
 				56C3D3137C7FD0BC38211B49 /* AppState.swift in Sources */,
 				CB55E94BE025D0AB9932FA11 /* Components.swift in Sources */,
 				051F8ACA27B67C9CD41B300C /* DevFlowApp.swift in Sources */,

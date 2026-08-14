@@ -136,26 +136,40 @@ final class KnowledgeBaseSessionController: NSObject, ObservableObject, WKNaviga
         let loginRequired = try await evaluateBoolean(#"Boolean(document.querySelector('#login-form, form[action*="/login"]'))"#)
         if loginRequired { throw KnowledgeBaseError.loginRequired }
 
+        // callAsyncJavaScript 会把 arguments 的 key 注入为顶层变量（statusName / assignee），不是 args.xxx
         let script = """
-        const statusName = args.statusName;
-        const assignee = args.assignee;
-        const statusSelect = document.querySelector('#issue_status_id, select[name="issue[status_id]"]');
-        const assigneeSelect = document.querySelector('#issue_assigned_to_id, select[name="issue[assigned_to_id]"]');
-        const form = document.querySelector('#issue-form, form.edit_issue');
-        if (!statusSelect || !form) return { ok: false, error: '未找到工单编辑表单或状态字段' };
-        const statusOption = [...statusSelect.options].find(option => option.textContent.trim() === statusName || option.textContent.includes(statusName));
-        if (!statusOption) return { ok: false, error: `未找到状态：${statusName}` };
-        statusSelect.value = statusOption.value;
-        if (assignee && assigneeSelect) {
-          const assigneeOption = [...assigneeSelect.options].find(option => option.value === assignee || option.textContent.trim() === assignee || option.textContent.includes(assignee));
-          if (!assigneeOption) return { ok: false, error: `未找到负责人：${assignee}` };
-          assigneeSelect.value = assigneeOption.value;
+        try {
+          const statusSelect = document.querySelector('#issue_status_id, select[name="issue[status_id]"]');
+          const assigneeSelect = document.querySelector('#issue_assigned_to_id, select[name="issue[assigned_to_id]"]');
+          const form = document.querySelector('#issue-form, form.edit_issue');
+          if (!statusSelect || !form) return { ok: false, error: '未找到工单编辑表单或状态字段' };
+          const statusOption = [...statusSelect.options].find(option => option.textContent.trim() === statusName || option.textContent.includes(statusName));
+          if (!statusOption) return { ok: false, error: `未找到状态：${statusName}` };
+          statusSelect.value = statusOption.value;
+          statusSelect.dispatchEvent(new Event('change', { bubbles: true }));
+          if (assignee && assigneeSelect) {
+            const assigneeOption = [...assigneeSelect.options].find(option => option.value === assignee || option.textContent.trim() === assignee || option.textContent.includes(assignee));
+            if (!assigneeOption) return { ok: false, error: `未找到负责人：${assignee}` };
+            assigneeSelect.value = assigneeOption.value;
+            assigneeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          if (typeof form.requestSubmit === 'function') {
+            form.requestSubmit();
+          } else {
+            form.submit();
+          }
+          return { ok: true };
+        } catch (e) {
+          return { ok: false, error: String(e && e.message ? e.message : e) };
         }
-        form.requestSubmit();
-        return { ok: true };
         """
 
-        let result = try await webView.callAsyncJavaScript(script, arguments: ["statusName": statusName, "assignee": assignee], in: nil, contentWorld: .page)
+        let result = try await webView.callAsyncJavaScript(
+            script,
+            arguments: ["statusName": statusName, "assignee": assignee],
+            in: nil,
+            contentWorld: .page
+        )
         guard let dictionary = result as? [String: Any], dictionary["ok"] as? Bool == true else {
             let message = (result as? [String: Any])?["error"] as? String ?? "工单更新失败"
             throw KnowledgeBaseError.updateFailed(message)
@@ -235,32 +249,54 @@ final class KnowledgeBaseSessionController: NSObject, ObservableObject, WKNaviga
             pageCount += 1;
 
             const text = (row, selector) => row.querySelector(selector)?.textContent?.trim() || '';
-            const rows = [...pageDocument.querySelectorAll('table.issues tbody tr')];
+            const parseIssueID = (row) => {
+              const fromRowID = (row.id || '').match(/^issue-(\\d+)$/);
+              if (fromRowID) return Number(fromRowID[1]);
+              const checkbox = row.querySelector('input[name="ids[]"], input[name="issue_ids[]"]');
+              if (checkbox?.value && /^\\d+$/.test(checkbox.value)) return Number(checkbox.value);
+              const link = row.querySelector('a[href*="/issues/"]');
+              const fromHref = (link?.getAttribute('href') || '').match(/\\/issues\\/(\\d+)/);
+              if (fromHref) return Number(fromHref[1]);
+              const idText = text(row, 'td.id').replace(/\\D/g, '');
+              return idText ? Number(idText) : 0;
+            };
+
+            // 优先只取真正的工单行，避免分组行/描述展开行被误扫后因缺字段被丢掉
+            let rows = [...pageDocument.querySelectorAll('table.issues tbody tr[id^="issue-"]')];
+            if (rows.length === 0) {
+              rows = [...pageDocument.querySelectorAll('table.issues tbody tr')]
+                .filter(row => !row.classList.contains('group') && !row.classList.contains('groupheader'));
+            }
+
             for (const row of rows) {
-              const link = row.querySelector('td.subject a, td.id a, a.issue');
-              const rawHref = link?.getAttribute('href') || '';
-              const href = rawHref ? new URL(rawHref, pageURL).href : '';
-              const idText = text(row, 'td.id') || link?.textContent || '';
-              const ticket = {
-                id: Number(idText.replace(/\\D/g, '')),
+              const id = parseIssueID(row);
+              if (!id || ticketsByID.has(id)) continue;
+
+              const link = row.querySelector('td.subject a[href*="/issues/"], td.id a[href*="/issues/"], a.issue[href*="/issues/"], a[href*="/issues/"]');
+              const rawHref = link?.getAttribute('href') || `/issues/${id}`;
+              const href = new URL(rawHref, pageURL).href;
+              let subject = text(row, 'td.subject') || link?.textContent?.trim() || '';
+              if (!subject) subject = `工单 #${id}`;
+
+              ticketsByID.set(id, {
+                id,
                 project: text(row, 'td.project') || '未分类项目',
                 tracker: text(row, 'td.tracker'),
                 priority: text(row, 'td.priority'),
                 status: text(row, 'td.status'),
-                subject: text(row, 'td.subject') || link?.textContent?.trim() || '',
+                subject,
                 description: '',
                 version: text(row, 'td.fixed_version') || text(row, 'td.version'),
                 assignee: text(row, 'td.assigned_to'),
                 author: text(row, 'td.author'),
                 updated: text(row, 'td.updated_on'),
                 url: href
-              };
-              if (ticket.id && ticket.subject && !ticketsByID.has(ticket.id)) {
-                ticketsByID.set(ticket.id, ticket);
-              }
+              });
             }
 
-            const nextLink = pageDocument.querySelector('a[rel="next"], .pagination .next a, .pagination a.next, li.next.page a');
+            const nextLink = pageDocument.querySelector(
+              'a[rel="next"], .pagination .next a, .pagination a.next, li.next.page a, .next a[href*="page="]'
+            );
             const nextHref = nextLink?.getAttribute('href');
             if (!nextHref) break;
             const nextURL = new URL(nextHref, pageURL).href;

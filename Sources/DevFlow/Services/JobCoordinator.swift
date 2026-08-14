@@ -89,6 +89,67 @@ final class JobCoordinator {
         tasks[item.id] = task
     }
 
+    /// 确认方案阶段：用户补充说明后重新分析并更新方案。
+    func reviseAnalysisPlan(itemID: UUID, userNote: String) {
+        let note = userNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !note.isEmpty,
+              let item = item(id: itemID), item.stage == .awaitingPlanApproval,
+              let ticket = appState.tickets.first(where: { $0.id == item.ticketID }) else { return }
+
+        let previousPlan = item.analysisPlan ?? ""
+        let mergedHelper: String = {
+            if item.helperContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "用户补充：\(note)"
+            }
+            return item.helperContext + "\n用户补充：\(note)"
+        }()
+
+        updateItem(itemID) {
+            $0.helperContext = mergedHelper
+            $0.stage = .analyzing
+            $0.execution = nil
+            $0.errorMessage = nil
+            $0.updatedAt = Date()
+            $0.logs.append(JobLogEntry(message: "用户补充：\(note)"))
+            $0.logs.append(JobLogEntry(message: "正在根据补充信息修订分析方案"))
+        }
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let execution = try await aiService.run(
+                    provider: item.provider,
+                    modelID: item.modelID,
+                    reasoningEffort: item.reasoningEffort,
+                    ticket: ticket,
+                    repositoryPath: item.repositoryPath,
+                    helperContext: mergedHelper,
+                    mode: .analysisRevision(previousPlan: previousPlan, userNote: note),
+                    onStarted: { [weak self] execution in
+                        await self?.recordStartedExecution(execution, for: item.id)
+                    },
+                    onEvent: { [weak self] event in
+                        await self?.handle(event, for: item.id)
+                    }
+                )
+                try completeAnalysis(execution, for: item.id)
+            } catch is CancellationError {
+                guard self.item(id: item.id)?.stage != .cancelled else {
+                    tasks[item.id] = nil
+                    return
+                }
+                setFailure("任务已取消", stage: .cancelled, for: item.id)
+            } catch DurableExecutionError.interrupted {
+                setInterrupted(for: item.id)
+            } catch {
+                setFailure(error.localizedDescription, stage: .failed, for: item.id)
+            }
+            tasks[item.id] = nil
+        }
+
+        tasks[item.id] = task
+    }
+
     private func startAnalysis(for item: WorkItem, ticket: Ticket, repository: RepositoryConfig) {
         let task = Task { [weak self] in
             guard let self else { return }
@@ -122,7 +183,7 @@ final class JobCoordinator {
                         await self?.handle(event, for: item.id)
                     }
                 )
-                completeAnalysis(execution, for: item.id)
+                try completeAnalysis(execution, for: item.id)
             } catch is CancellationError {
                 guard self.item(id: item.id)?.stage != .cancelled else {
                     tasks[item.id] = nil
@@ -197,7 +258,7 @@ final class JobCoordinator {
                     await self?.handle(event, for: itemID)
                 }
                 if execution.phase == .analysis {
-                    completeAnalysis(result, for: itemID)
+                    try completeAnalysis(result, for: itemID)
                 } else {
                     try await completeModification(result, for: itemID)
                 }
@@ -245,14 +306,23 @@ final class JobCoordinator {
         }
     }
 
-    func approveAndDeliver(itemID: UUID, commitMessage: String, manualAssignee: String) async {
+    func approveAndDeliver(
+        itemID: UUID,
+        commitMessage: String,
+        manualAssignee: String,
+        reassignToAuthor: Bool = true
+    ) async {
         guard let currentItem = item(id: itemID), let ticket = appState.tickets.first(where: { $0.id == currentItem.ticketID }) else { return }
         guard currentItem.stage == .awaitingApproval else { return }
         let repository = appState.repositories.first { $0.path == currentItem.repositoryPath }
         let remote = repository?.remoteName ?? "origin"
 
         do {
-            let deliveryAssignee = try deliveryAssignee(for: ticket, manualAssignee: manualAssignee)
+            let deliveryAssignee = try deliveryAssignee(
+                for: ticket,
+                manualAssignee: manualAssignee,
+                reassignToAuthor: reassignToAuthor
+            )
             setStage(.committing, for: itemID)
             append("正在创建本地 commit", to: itemID)
             let commitHash = try await gitService.commit(message: commitMessage, at: currentItem.repositoryPath)
@@ -279,8 +349,12 @@ final class JobCoordinator {
                 append("当前为示例工单，未绑定知识库地址，跳过远程工单更新", to: itemID)
             } else {
                 do {
-                    try await appState.knowledgeBaseSession.updateTicket(ticket: ticket, statusName: "待测试", assignee: deliveryAssignee)
-                    append(deliveryLogMessage(for: ticket, assignee: deliveryAssignee), to: itemID)
+                    try await appState.knowledgeBaseSession.updateTicket(
+                        ticket: ticket,
+                        statusName: "待测试",
+                        assignee: deliveryAssignee
+                    )
+                    append(deliveryLogMessage(for: ticket, assignee: deliveryAssignee, reassignToAuthor: reassignToAuthor), to: itemID)
                 } catch {
                     setFailure("代码已 push，但工单更新失败：\(error.localizedDescription)。仅可重试工单更新。", stage: .partial, for: itemID)
                     return
@@ -298,17 +372,25 @@ final class JobCoordinator {
         }
     }
 
-    func retryTicketUpdate(itemID: UUID, manualAssignee: String) async {
+    func retryTicketUpdate(itemID: UUID, manualAssignee: String, reassignToAuthor: Bool = true) async {
         guard let currentItem = item(id: itemID), currentItem.stage == .partial,
               let ticket = appState.tickets.first(where: { $0.id == currentItem.ticketID }) else { return }
         do {
-            let deliveryAssignee = try deliveryAssignee(for: ticket, manualAssignee: manualAssignee)
+            let deliveryAssignee = try deliveryAssignee(
+                for: ticket,
+                manualAssignee: manualAssignee,
+                reassignToAuthor: reassignToAuthor
+            )
             setStage(.updatingTicket, for: itemID)
-            try await appState.knowledgeBaseSession.updateTicket(ticket: ticket, statusName: "待测试", assignee: deliveryAssignee)
+            try await appState.knowledgeBaseSession.updateTicket(
+                ticket: ticket,
+                statusName: "待测试",
+                assignee: deliveryAssignee
+            )
             updateItem(itemID) {
                 $0.stage = .completed
                 $0.errorMessage = nil
-                $0.logs.append(JobLogEntry(message: deliveryLogMessage(for: ticket, assignee: deliveryAssignee)))
+                $0.logs.append(JobLogEntry(message: deliveryLogMessage(for: ticket, assignee: deliveryAssignee, reassignToAuthor: reassignToAuthor)))
             }
             applyDeliveredTicketState(ticketID: ticket.id, assignee: deliveryAssignee)
         } catch {
@@ -361,7 +443,10 @@ final class JobCoordinator {
         }
     }
 
-    private func completeAnalysis(_ execution: AIExecutionResult, for itemID: UUID) {
+    private func completeAnalysis(_ execution: AIExecutionResult, for itemID: UUID) throws {
+        guard PromptBuilder.hasRequiredProtocolMarkers(execution.finalMessage, phase: .analysis) else {
+            throw AIExecutionError.incompleteProtocolOutput(.analysis)
+        }
         updateItem(itemID) {
             $0.analysisPlan = execution.finalMessage
             $0.stage = .awaitingPlanApproval
@@ -373,6 +458,9 @@ final class JobCoordinator {
     }
 
     private func completeModification(_ execution: AIExecutionResult, for itemID: UUID) async throws {
+        guard PromptBuilder.hasRequiredProtocolMarkers(execution.finalMessage, phase: .modification) else {
+            throw AIExecutionError.incompleteProtocolOutput(.modification)
+        }
         guard let currentItem = item(id: itemID) else { return }
         setStage(.reviewing, for: itemID)
         append("正在收集代码差异和修改文件", to: itemID)
@@ -407,11 +495,16 @@ final class JobCoordinator {
         }
     }
 
-    private func deliveryAssignee(for ticket: Ticket, manualAssignee: String) throws -> String {
+    private func deliveryAssignee(
+        for ticket: Ticket,
+        manualAssignee: String,
+        reassignToAuthor: Bool = true
+    ) throws -> String {
         if ticket.kind == .feature {
             return ""
         }
         if ticket.requiresAuthorReassignment {
+            guard reassignToAuthor else { return "" }
             let author = ticket.normalizedAuthor
             if author.isEmpty, ticket.sourceURL != nil {
                 throw JobError.missingTicketAuthor
@@ -421,11 +514,18 @@ final class JobCoordinator {
         return manualAssignee.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func deliveryLogMessage(for ticket: Ticket, assignee: String) -> String {
+    private func deliveryLogMessage(
+        for ticket: Ticket,
+        assignee: String,
+        reassignToAuthor: Bool = true
+    ) -> String {
         if ticket.kind == .feature {
             return "工单已转为待测试，负责人保持不变"
         }
         if ticket.requiresAuthorReassignment {
+            if !reassignToAuthor {
+                return "工单已转为待测试，按选择未转交创建人"
+            }
             return assignee.isEmpty
                 ? "工单已转为待测试，未获取到创建人，负责人保持不变"
                 : "工单已转为待测试并转交给创建人 \(assignee)"
