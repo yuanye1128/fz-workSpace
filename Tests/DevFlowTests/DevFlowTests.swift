@@ -105,6 +105,51 @@ final class DevFlowTests: XCTestCase {
         let snapshot = try decoder.decode(AppSnapshot.self, from: data)
 
         XCTAssertEqual(snapshot.syncIntervalHours, 2)
+        XCTAssertEqual(snapshot.aiProviderOrder, [.cursor, .codex, .claude])
+    }
+
+    func testAIProviderDefaultOrderPutsCursorFirst() {
+        XCTAssertEqual(Array(AIProvider.allCases), [.cursor, .codex, .claude])
+    }
+
+    func testAIProviderNormalizedOrderKeepsCustomOrderAndAppendsMissing() {
+        XCTAssertEqual(
+            AIProvider.normalizedOrder([.claude, .claude, .codex]),
+            [.claude, .codex, .cursor]
+        )
+        XCTAssertEqual(AIProvider.normalizedOrder([]), [.cursor, .codex, .claude])
+    }
+
+    func testSnapshotDecodesCustomAIProviderOrder() throws {
+        let json = """
+        {
+          "tickets": [],
+          "repositories": [],
+          "workItems": [],
+          "knowledgeBaseURL": "https://kb.example.com/issues",
+          "defaultTestAssignee": "alice",
+          "hasAuthenticatedSession": true,
+          "aiProviderOrder": ["Claude Code", "Cursor", "unknown"]
+        }
+        """
+        let data = Data(json.utf8)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let snapshot = try decoder.decode(AppSnapshot.self, from: data)
+
+        XCTAssertEqual(snapshot.aiProviderOrder, [.claude, .cursor, .codex])
+    }
+
+    @MainActor
+    func testMovingAIProviderUpdatesOrderedList() {
+        let state = AppState()
+        state.aiProviderOrder = [.cursor, .codex, .claude]
+        state.moveAIProvider(.claude, to: .cursor)
+        XCTAssertEqual(state.orderedAIProviders, [.claude, .cursor, .codex])
+        state.moveAIProvider(.codex, to: .claude)
+        XCTAssertEqual(state.orderedAIProviders, [.codex, .claude, .cursor])
+        state.moveAIProvider(.codex, to: .codex)
+        XCTAssertEqual(state.orderedAIProviders, [.codex, .claude, .cursor])
     }
 
     func testPromptContainsSafetyGateAndIssueContext() {
@@ -396,6 +441,108 @@ final class DevFlowTests: XCTestCase {
         XCTAssertFalse(pull.conflicts.isEmpty)
         XCTAssertTrue(pull.conflicts.contains("value.txt"))
         XCTAssertNotEqual(try runGit(["status", "--porcelain"], at: second.path), "")
+    }
+
+    func testWorktreeKeepsMainCheckoutAndMergeReportsConflicts() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("devflow-wt-\(UUID().uuidString)")
+        let remote = root.appendingPathComponent("remote.git")
+        let repo = root.appendingPathComponent("repo")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try runGit(["init", "--bare", remote.path], at: root.path)
+        try runGit(["clone", remote.path, repo.path], at: root.path)
+        try configureGit(at: repo.path)
+        try "base\n".write(to: repo.appendingPathComponent("value.txt"), atomically: true, encoding: .utf8)
+        try runGit(["add", "value.txt"], at: repo.path)
+        try runGit(["commit", "-m", "base"], at: repo.path)
+        try runGit(["branch", "-M", "main"], at: repo.path)
+        try runGit(["push", "-u", "origin", "main"], at: repo.path)
+        try runGit(["checkout", "-b", "feature"], at: repo.path)
+        try "feature-only\n".write(to: repo.appendingPathComponent("feature.txt"), atomically: true, encoding: .utf8)
+        try runGit(["add", "feature.txt"], at: repo.path)
+        try runGit(["commit", "-m", "feature work"], at: repo.path)
+
+        let service = GitService()
+        let mainBefore = try await service.currentBranch(at: repo.path)
+        XCTAssertEqual(mainBefore, "feature")
+
+        let taskWT = root.appendingPathComponent("task-wt").path
+        try await service.createTaskWorktree(
+            repositoryPath: repo.path,
+            targetBranch: "main",
+            taskBranch: "devflow/task-1",
+            worktreePath: taskWT
+        )
+        let branchAfterTaskWT = try await service.currentBranch(at: repo.path)
+        let taskBranchName = try await service.currentBranch(at: taskWT)
+        XCTAssertEqual(branchAfterTaskWT, "feature")
+        XCTAssertEqual(taskBranchName, "devflow/task-1")
+
+        try "task-change\n".write(to: URL(fileURLWithPath: taskWT).appendingPathComponent("value.txt"), atomically: true, encoding: .utf8)
+        let hash = try await service.commit(message: "fix: #1 task", at: taskWT)
+        XCTAssertFalse(hash.isEmpty)
+
+        let mergeWT = root.appendingPathComponent("merge-wt").path
+        try await service.createMergeWorktree(
+            repositoryPath: repo.path,
+            targetBranch: "main",
+            mergeBranch: "devflow/merge-1",
+            worktreePath: mergeWT
+        )
+        let branchAfterMergeWT = try await service.currentBranch(at: repo.path)
+        XCTAssertEqual(branchAfterMergeWT, "feature")
+
+        let merge = try await service.mergeBranch(
+            "devflow/task-1",
+            intoCheckoutAt: mergeWT,
+            message: "Merge task into main"
+        )
+        XCTAssertTrue(merge.success)
+        XCTAssertNotNil(merge.mergedCommitHash)
+
+        try await service.pushHEAD(toRemoteBranch: "main", remote: "origin", at: mergeWT)
+        let branchAfterPush = try await service.currentBranch(at: repo.path)
+        XCTAssertEqual(branchAfterPush, "feature")
+
+        // conflict case
+        let taskWT2 = root.appendingPathComponent("task-wt-2").path
+        try await service.createTaskWorktree(
+            repositoryPath: repo.path,
+            targetBranch: "main",
+            taskBranch: "devflow/task-2",
+            worktreePath: taskWT2
+        )
+        try "from-task-2\n".write(to: URL(fileURLWithPath: taskWT2).appendingPathComponent("value.txt"), atomically: true, encoding: .utf8)
+        _ = try await service.commit(message: "task2", at: taskWT2)
+
+        let other = root.appendingPathComponent("other")
+        try runGit(["clone", "--branch", "main", remote.path, other.path], at: root.path)
+        try configureGit(at: other.path)
+        try "from-remote\n".write(to: other.appendingPathComponent("value.txt"), atomically: true, encoding: .utf8)
+        try runGit(["commit", "-am", "remote change"], at: other.path)
+        try runGit(["push", "origin", "main"], at: other.path)
+
+        // refresh local main ref without checking it out
+        try runGit(["fetch", "origin"], at: repo.path)
+        try runGit(["update-ref", "refs/heads/main", "refs/remotes/origin/main"], at: repo.path)
+
+        let mergeWT2 = root.appendingPathComponent("merge-wt-2").path
+        try await service.createMergeWorktree(
+            repositoryPath: repo.path,
+            targetBranch: "main",
+            mergeBranch: "devflow/merge-2",
+            worktreePath: mergeWT2
+        )
+        let conflicted = try await service.mergeBranch(
+            "devflow/task-2",
+            intoCheckoutAt: mergeWT2,
+            message: "Merge task2"
+        )
+        XCTAssertFalse(conflicted.success)
+        XCTAssertTrue(conflicted.conflicts.contains("value.txt"))
+        let branchFinal = try await service.currentBranch(at: repo.path)
+        XCTAssertEqual(branchFinal, "feature")
     }
 
     private func configureGit(at path: String) throws {

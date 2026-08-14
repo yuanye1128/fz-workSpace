@@ -134,11 +134,32 @@ struct RepositoryConfig: Identifiable, Codable, Hashable {
 }
 
 enum AIProvider: String, Codable, CaseIterable, Identifiable {
-    case codex = "Codex"
     case cursor = "Cursor"
+    case codex = "Codex"
     case claude = "Claude Code"
 
     var id: String { rawValue }
+
+    var command: String {
+        switch self {
+        case .cursor: "cursor-agent"
+        case .codex: "codex"
+        case .claude: "claude"
+        }
+    }
+
+    /// 保留已保存的自定义顺序，并补齐尚未出现过的工具（默认 Cursor 第一）。
+    static func normalizedOrder(_ stored: [AIProvider]) -> [AIProvider] {
+        var result: [AIProvider] = []
+        var seen = Set<AIProvider>()
+        for provider in stored where seen.insert(provider).inserted {
+            result.append(provider)
+        }
+        for provider in allCases where seen.insert(provider).inserted {
+            result.append(provider)
+        }
+        return result
+    }
 }
 
 struct AIModelOption: Identifiable, Hashable, Sendable {
@@ -255,6 +276,7 @@ enum JobStage: String, Codable, CaseIterable {
     case awaitingApproval = "人工确认"
     case committing = "本地 Commit"
     case pulling = "拉取最新代码"
+    case merging = "合并回目标分支"
     case pushing = "Push"
     case updatingTicket = "转为待测试"
     case completed = "已完成"
@@ -317,7 +339,14 @@ struct WorkItem: Identifiable, Codable, Equatable {
     var modelID: String? = nil
     var reasoningEffort: String? = nil
     var repositoryPath: String
+    /// 开任务时选择的目标分支；交付时 merge 合回该分支。
     var branch: String
+    /// 任务专用分支（worktree 上使用）。
+    var taskBranch: String? = nil
+    /// 任务 worktree 路径；为空表示旧版直接改主仓库。
+    var worktreePath: String? = nil
+    /// merge 冲突时保留的临时 worktree，供用户手工处理。
+    var mergeWorktreePath: String? = nil
     var helperContext: String
     var stage: JobStage
     var logs: [JobLogEntry]
@@ -328,6 +357,9 @@ struct WorkItem: Identifiable, Codable, Equatable {
     var execution: AIExecutionRecord? = nil
     var createdAt = Date()
     var updatedAt = Date()
+
+    /// AI / diff / commit 实际使用的工作目录。
+    var workingDirectory: String { worktreePath ?? repositoryPath }
 }
 
 extension Date {

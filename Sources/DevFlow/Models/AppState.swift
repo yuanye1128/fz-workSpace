@@ -39,6 +39,7 @@ final class AppState: ObservableObject {
     @Published var knowledgeBaseURL = KnowledgeBaseQuery.allAssignedIssuesURL
     @Published var defaultTestAssignee = ""
     @Published var selectedTicketForReport: Ticket?
+    @Published var aiProviderOrder: [AIProvider] = Array(AIProvider.allCases)
 
     let persistence = PersistenceStore()
     lazy var knowledgeBaseSession = KnowledgeBaseSessionController()
@@ -135,6 +136,19 @@ final class AppState: ObservableObject {
 
     var clampedAutoSyncIntervalHours: Int {
         min(8, max(1, autoSyncIntervalHours))
+    }
+
+    var orderedAIProviders: [AIProvider] {
+        AIProvider.normalizedOrder(aiProviderOrder)
+    }
+
+    func moveAIProvider(_ provider: AIProvider, to target: AIProvider) {
+        var order = orderedAIProviders
+        guard let from = order.firstIndex(of: provider),
+              let to = order.firstIndex(of: target),
+              from != to else { return }
+        order.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+        aiProviderOrder = order
     }
 
     var filteredTickets: [Ticket] {
@@ -359,7 +373,8 @@ final class AppState: ObservableObject {
                 defaultTestAssignee: defaultTestAssignee,
                 syncIntervalHours: clampedAutoSyncIntervalHours,
                 hasAuthenticatedSession: hasAuthenticatedSession,
-                lastSyncedAt: lastSyncedAt
+                lastSyncedAt: lastSyncedAt,
+                aiProviderOrder: orderedAIProviders
             )
         )
     }
@@ -429,6 +444,7 @@ final class AppState: ObservableObject {
         defaultTestAssignee = snapshot.defaultTestAssignee
         autoSyncIntervalHours = min(8, max(1, snapshot.syncIntervalHours))
         hasAuthenticatedSession = snapshot.hasAuthenticatedSession
+        aiProviderOrder = AIProvider.normalizedOrder(snapshot.aiProviderOrder)
         syncStatus = snapshot.lastSyncedAt.map(SyncStatus.synced)
             ?? (hasAuthenticatedSession || !tickets.isEmpty ? .idle : .loginRequired)
     }

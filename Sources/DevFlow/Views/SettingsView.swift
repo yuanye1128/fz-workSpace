@@ -1,9 +1,12 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @Environment(\.colorScheme) private var colorScheme
     @State private var draftAutoSyncIntervalHours = 2
+    @State private var toolAvailability: [AIProvider: Bool] = [:]
+    @State private var draggingProvider: AIProvider?
 
     private var hasUnsavedAutoSyncInterval: Bool {
         draftAutoSyncIntervalHours != appState.clampedAutoSyncIntervalHours
@@ -83,11 +86,16 @@ struct SettingsView: View {
                 }
 
                 settingsSection("AI 工具") {
-                    ToolStatusRow(name: "Codex", command: "codex")
-                    Divider()
-                    ToolStatusRow(name: "Cursor", command: "cursor-agent")
-                    Divider()
-                    ToolStatusRow(name: "Claude Code", command: "claude")
+                    Text("已安装的工具可拖动排序，工单详情中的 AI 工具会使用同一顺序。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+
+                    ForEach(Array(appState.orderedAIProviders.enumerated()), id: \.element) { index, provider in
+                        if index > 0 {
+                            Divider()
+                        }
+                        toolRow(provider)
+                    }
                 }
             }
             .padding(28)
@@ -97,6 +105,16 @@ struct SettingsView: View {
         .background(DevFlowTheme.canvas(colorScheme))
         .onAppear {
             draftAutoSyncIntervalHours = appState.clampedAutoSyncIntervalHours
+        }
+        .onDisappear {
+            appState.persistState()
+        }
+        .task {
+            var availability: [AIProvider: Bool] = [:]
+            for provider in AIProvider.allCases {
+                availability[provider] = await ProcessRunner.commandExists(provider.command)
+            }
+            toolAvailability = availability
         }
     }
 
@@ -124,23 +142,62 @@ struct SettingsView: View {
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(DevFlowTheme.border(colorScheme)))
         }
     }
+
+    @ViewBuilder
+    private func toolRow(_ provider: AIProvider) -> some View {
+        let available = toolAvailability[provider]
+        let row = ToolStatusRow(provider: provider, available: available)
+            .opacity(draggingProvider == provider ? 0.45 : 1)
+            .contentShape(Rectangle())
+            .onDrop(
+                of: [.plainText],
+                delegate: AIProviderDropDelegate(
+                    target: provider,
+                    dragging: { draggingProvider },
+                    isDraggable: { toolAvailability[$0] == true },
+                    move: { source, target in
+                        appState.moveAIProvider(source, to: target)
+                    },
+                    commit: {
+                        appState.persistState()
+                    },
+                    clearDragging: {
+                        draggingProvider = nil
+                    }
+                )
+            )
+
+        if available == true {
+            row
+                .onDrag {
+                    draggingProvider = provider
+                    return NSItemProvider(object: provider.rawValue as NSString)
+                }
+        } else {
+            row
+        }
+    }
 }
 
 private struct ToolStatusRow: View {
-    @State private var available: Bool?
-    let name: String
-    let command: String
+    let provider: AIProvider
+    let available: Bool?
 
     var body: some View {
-        HStack {
+        HStack(spacing: 10) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(available == true ? Color.secondary.opacity(0.75) : .clear)
+                .frame(width: 14)
+                .help(available == true ? "拖动调整顺序" : "未检测到，无法调整顺序")
             ZStack {
                 RoundedRectangle(cornerRadius: 8).fill(DevFlowTheme.accent.opacity(0.1))
                 Image(systemName: "terminal.fill").foregroundStyle(DevFlowTheme.accent)
             }
             .frame(width: 34, height: 34)
             VStack(alignment: .leading, spacing: 3) {
-                Text(name).font(.system(size: 14, weight: .semibold))
-                Text(command).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                Text(provider.rawValue).font(.system(size: 14, weight: .semibold))
+                Text(provider.command).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
             }
             Spacer()
             if let available {
@@ -149,8 +206,38 @@ private struct ToolStatusRow: View {
                 ProgressView().controlSize(.small)
             }
         }
-        .task {
-            available = await ProcessRunner.commandExists(command)
+    }
+}
+
+private struct AIProviderDropDelegate: DropDelegate {
+    let target: AIProvider
+    let dragging: () -> AIProvider?
+    let isDraggable: (AIProvider) -> Bool
+    let move: (AIProvider, AIProvider) -> Void
+    let commit: () -> Void
+    let clearDragging: () -> Void
+
+    func validateDrop(info: DropInfo) -> Bool {
+        if let dragging = dragging() {
+            return isDraggable(dragging)
         }
+        return info.hasItemsConforming(to: [.plainText])
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func dropEntered(info: DropInfo) {
+        guard let dragging = dragging(), isDraggable(dragging), dragging != target else { return }
+        withAnimation(.easeInOut(duration: 0.16)) {
+            move(dragging, target)
+        }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        commit()
+        clearDragging()
+        return true
     }
 }

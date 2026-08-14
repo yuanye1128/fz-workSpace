@@ -9,6 +9,7 @@ struct AppSnapshot: Codable {
     var syncIntervalHours: Int
     var hasAuthenticatedSession: Bool
     var lastSyncedAt: Date?
+    var aiProviderOrder: [AIProvider]
 
     init(
         tickets: [Ticket],
@@ -18,7 +19,8 @@ struct AppSnapshot: Codable {
         defaultTestAssignee: String,
         syncIntervalHours: Int,
         hasAuthenticatedSession: Bool,
-        lastSyncedAt: Date? = nil
+        lastSyncedAt: Date? = nil,
+        aiProviderOrder: [AIProvider] = Array(AIProvider.allCases)
     ) {
         self.tickets = tickets
         self.repositories = repositories
@@ -28,6 +30,7 @@ struct AppSnapshot: Codable {
         self.syncIntervalHours = syncIntervalHours
         self.hasAuthenticatedSession = hasAuthenticatedSession
         self.lastSyncedAt = lastSyncedAt
+        self.aiProviderOrder = AIProvider.normalizedOrder(aiProviderOrder)
     }
 
     init(from decoder: Decoder) throws {
@@ -42,6 +45,9 @@ struct AppSnapshot: Codable {
         // 旧版 state.json 无此字段：仅用于判断是否曾登录，不再据此恢复工单列表
         hasAuthenticatedSession = try container.decodeIfPresent(Bool.self, forKey: .hasAuthenticatedSession)
             ?? !tickets.isEmpty
+        let storedOrder = (try container.decodeIfPresent([String].self, forKey: .aiProviderOrder) ?? [])
+            .compactMap(AIProvider.init(rawValue:))
+        aiProviderOrder = AIProvider.normalizedOrder(storedOrder)
     }
 }
 

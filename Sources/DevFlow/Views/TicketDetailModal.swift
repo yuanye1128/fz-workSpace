@@ -8,7 +8,7 @@ struct TicketDetailModal: View {
     @State private var selectedRepositoryID: UUID?
     @State private var branch = ""
     @State private var isLoadingBranch = false
-    @State private var provider: AIProvider = .codex
+    @State private var provider: AIProvider = .cursor
     @State private var availableModels: [AIModelOption] = []
     @State private var selectedModelID = ""
     @State private var customModelID = ""
@@ -332,7 +332,7 @@ struct TicketDetailModal: View {
                     .foregroundStyle(.secondary)
             }
             Picker(prefersExternalAgent ? "打开到客户端" : "AI 工具", selection: $provider) {
-                ForEach(AIProvider.allCases) { provider in
+                ForEach(appState.orderedAIProviders) { provider in
                     Text(provider.rawValue).tag(provider)
                 }
             }
@@ -590,6 +590,9 @@ struct TicketDetailModal: View {
 
     private func configureDefaults() {
         guard !isTestingTicket else { return }
+        if let preferredProvider = appState.orderedAIProviders.first {
+            provider = preferredProvider
+        }
         if let defaultRepository = repositories.first(where: \.isDefault) ?? repositories.first {
             selectedRepositoryID = defaultRepository.id
             branch = defaultRepository.defaultBranch
@@ -915,7 +918,7 @@ private struct WorkItemContent: View {
                 .font(.system(size: 27))
                 .foregroundStyle(DevFlowTheme.success)
         case .preparing, .analyzing, .runningAI, .reviewing,
-             .committing, .pulling, .pushing, .updatingTicket:
+             .committing, .pulling, .merging, .pushing, .updatingTicket:
             ProgressView().controlSize(.large)
         default:
             // awaitingApproval / awaitingPlanApproval 等回看时不应再转圈
@@ -1094,7 +1097,7 @@ struct JobStageStrip: View {
         case .awaitingPlanApproval: 1
         case .runningAI: 2
         case .reviewing, .awaitingApproval: 3
-        case .committing, .pulling, .pushing, .updatingTicket, .partial, .completed: 4
+        case .committing, .pulling, .merging, .pushing, .updatingTicket, .partial, .completed: 4
         case .preparing, .interrupted, .failed, .cancelled: nil
         }
     }
@@ -1184,7 +1187,7 @@ private struct DeliveryStatusView: View {
     private var commitDone: Bool {
         item.commitHash != nil
             || item.logs.contains { $0.message.contains("本地 commit 完成") }
-            || [.pulling, .pushing, .updatingTicket, .partial, .completed].contains(item.stage)
+            || [.pulling, .merging, .pushing, .updatingTicket, .partial, .completed].contains(item.stage)
     }
 
     private var pushDone: Bool {
@@ -1206,7 +1209,9 @@ private struct DeliveryStatusView: View {
         case .committing:
             ("正在提交代码", "创建本地 commit…", DevFlowTheme.accent, "arrow.up.circle")
         case .pulling:
-            ("正在提交代码", "拉取远程最新代码…", DevFlowTheme.accent, "arrow.down.circle")
+            ("正在同步目标分支", "拉取远程最新代码…", DevFlowTheme.accent, "arrow.down.circle")
+        case .merging:
+            ("正在合并回目标分支", "merge 合回 \(item.branch)…", DevFlowTheme.accent, "arrow.triangle.merge")
         case .pushing:
             ("正在提交代码", "Push 到远程仓库…", DevFlowTheme.accent, "icloud.and.arrow.up")
         case .updatingTicket:
@@ -1230,9 +1235,17 @@ private struct DeliveryStatusView: View {
                             state: commitDone ? .done : (item.stage == .committing ? .running : .pending)
                         ),
                         .init(
-                            title: "Push 远程",
-                            detail: pushDone ? "已推送 \(item.branch)" : (item.stage == .pushing ? "推送中…" : (item.stage == .pulling ? "拉取中…" : "等待中")),
-                            state: pushDone ? .done : ([.pulling, .pushing].contains(item.stage) ? .running : .pending)
+                            title: "Push / 合回",
+                            detail: pushDone
+                                ? "已合回并推送 \(item.branch)"
+                                : (item.stage == .pushing
+                                   ? "推送中…"
+                                   : (item.stage == .merging
+                                      ? "合并中…"
+                                      : (item.stage == .pulling ? "同步目标分支…" : "等待中"))),
+                            state: pushDone
+                                ? .done
+                                : ([.pulling, .merging, .pushing].contains(item.stage) ? .running : .pending)
                         )
                     ]
                 )
@@ -1250,6 +1263,21 @@ private struct DeliveryStatusView: View {
 
                 if item.stage == .partial {
                     retryBar
+                }
+
+                if item.stage == .failed, let mergePath = item.mergeWorktreePath {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("需手工处理 Git")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(DevFlowTheme.warning)
+                        Text("合并工作区仍保留，请自行解决后推送：\n\(mergePath)")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(DevFlowTheme.warning.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
 
                 if item.stage == .completed || item.stage == .partial {
@@ -1282,7 +1310,7 @@ private struct DeliveryStatusView: View {
                     .textSelection(.enabled)
             }
             Spacer(minLength: 0)
-            if [.committing, .pulling, .pushing, .updatingTicket].contains(item.stage) {
+            if [.committing, .pulling, .merging, .pushing, .updatingTicket].contains(item.stage) {
                 ProgressView().controlSize(.regular)
             }
         }
