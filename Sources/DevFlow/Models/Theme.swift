@@ -6,6 +6,8 @@ enum DevFlowTheme {
     static let success = Color(red: 0.16, green: 0.65, blue: 0.42)
     static let warning = Color(red: 0.95, green: 0.55, blue: 0.18)
     static let danger = Color(red: 0.94, green: 0.24, blue: 0.28)
+    /// 普通优先级：有色但不抢眼，避免系统灰在标签和色条上发脏。
+    static let quiet = Color(red: 0.42, green: 0.58, blue: 0.76)
 
     static func canvas(_ scheme: ColorScheme) -> Color {
         scheme == .dark ? Color(red: 0.059, green: 0.067, blue: 0.082) : Color(red: 0.975, green: 0.98, blue: 0.99)
@@ -51,7 +53,7 @@ extension TicketPriority {
         switch self {
         case .urgent: DevFlowTheme.danger
         case .high: DevFlowTheme.warning
-        case .normal: Color.secondary
+        case .normal: DevFlowTheme.quiet
         }
     }
 }

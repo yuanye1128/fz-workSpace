@@ -9,6 +9,7 @@ final class AppState: ObservableObject {
     @Published var projects: [Project] = []
     @Published var repositories: [RepositoryConfig] = []
     @Published var workItems: [WorkItem] = []
+    @Published var planningSessions: [RequirementPlanSession] = []
     @Published var destination: SidebarDestination = .all
     @Published var selectedProjectID: String?
     @Published var searchText = ""
@@ -40,10 +41,21 @@ final class AppState: ObservableObject {
     @Published var defaultTestAssignee = ""
     @Published var selectedTicketForReport: Ticket?
     @Published var aiProviderOrder: [AIProvider] = Array(AIProvider.allCases)
+    @Published var isTestModeEnabled = false
+    @Published var agentAPIURL = ""
+    @Published var agentAPIKey = ""
+    @Published var agentModelID = ""
+    @Published var agentSystemPrompt = "你是一个可以调用本地工具的开发助手。需要读取或修改项目时，先说明原因。"
+    @Published var customAIProviders: [CustomAIProviderConfig] = []
+    @Published var agentInitialPrompt: String?
+    @Published var agentSelectedProviderID: UUID?
+
+    static let localTestTicketIDBase = 9_000_000
 
     let persistence = PersistenceStore()
     lazy var knowledgeBaseSession = KnowledgeBaseSessionController()
     lazy var jobCoordinator = JobCoordinator(appState: self)
+    lazy var requirementPlanner = RequirementPlanner(appState: self)
     private var syncInProgress = false
     private var hasPerformedLaunchSync = false
     private var automaticSyncLoopStarted = false
@@ -132,7 +144,8 @@ final class AppState: ObservableObject {
     }
 
     /// 没有任何缓存工单且尚未建立会话时，首页才展示登录引导。
-    var needsLogin: Bool { tickets.isEmpty && !hasAuthenticatedSession }
+    /// 测试模式开启时允许在无登录状态下使用本地假工单。
+    var needsLogin: Bool { tickets.isEmpty && !hasAuthenticatedSession && !isTestModeEnabled }
 
     var clampedAutoSyncIntervalHours: Int {
         min(8, max(1, autoSyncIntervalHours))
@@ -152,7 +165,8 @@ final class AppState: ObservableObject {
     }
 
     var filteredTickets: [Ticket] {
-        tickets
+        let source = destination == .completed ? completedHistoryTickets : tickets
+        return source
             .filter { ticket in
                 if let selectedProjectID, ticket.projectID != selectedProjectID { return false }
                 switch destination {
@@ -162,8 +176,8 @@ final class AppState: ObservableObject {
                 case .approval:
                     guard activeWorkItem(for: ticket.id)?.stage.requiresUserApproval == true else { return false }
                 case .completed:
-                    guard ticket.status == .completed || workItems.contains(where: { $0.ticketID == ticket.id && $0.stage == .completed }) else { return false }
-                case .repositories, .settings:
+                    break
+                case .repositories, .agent, .settings:
                     return false
                 }
                 if !searchText.isEmpty {
@@ -173,7 +187,8 @@ final class AppState: ObservableObject {
                 }
                 if let kind = filters.kind, ticket.kind != kind { return false }
                 if let priority = filters.priority, ticket.priority != priority { return false }
-                if let status = filters.status, ticket.status != status { return false }
+                // 交付成功后本地状态是「待测试」，已完成面板按任务记录收口，不再套用状态筛选。
+                if destination != .completed, let status = filters.status, ticket.status != status { return false }
                 if let version = filters.version, ticket.targetVersion != version { return false }
                 return true
             }
@@ -209,6 +224,32 @@ final class AppState: ObservableObject {
         return ticket.status == .processing
     }
 
+    func isInCompletedList(_ ticket: Ticket) -> Bool {
+        ticket.status == .completed
+            || ticket.status == .testing
+            || hasCompletedWorkItem(for: ticket.id)
+    }
+
+    func hasCompletedWorkItem(for ticketID: Int) -> Bool {
+        workItems.contains { $0.ticketID == ticketID && $0.stage == .completed }
+    }
+
+    /// 已完成面板：当前列表里的已完成工单，加上任务还在、工单已被同步掉的本地记录。
+    var completedHistoryTickets: [Ticket] {
+        var result: [Ticket] = []
+        var seen = Set<Int>()
+        for ticket in tickets where isInCompletedList(ticket) {
+            result.append(ticket)
+            seen.insert(ticket.id)
+        }
+        for item in workItems where item.stage == .completed {
+            guard !seen.contains(item.ticketID) else { continue }
+            result.append(Self.placeholderTicket(forCompletedWork: item))
+            seen.insert(item.ticketID)
+        }
+        return result
+    }
+
     var availableVersions: [String] {
         Array(Set(tickets.map(\.targetVersion))).sorted().reversed()
     }
@@ -233,7 +274,7 @@ final class AppState: ObservableObject {
         case .approval:
             workItems.filter { $0.stage.requiresUserApproval }.count
         case .completed:
-            workItems.filter { $0.stage == .completed }.count
+            completedHistoryTickets.count
         default:
             nil
         }
@@ -282,6 +323,9 @@ final class AppState: ObservableObject {
         if let item = activeWorkItem(for: ticketID) {
             jobCoordinator.cancel(itemID: item.id)
         }
+        if planningSession(for: ticketID) != nil {
+            requirementPlanner.cancel(ticketID: ticketID)
+        }
         if let index = tickets.firstIndex(where: { $0.id == ticketID }), tickets[index].status == .processing {
             tickets[index].status = .new
         }
@@ -323,6 +367,7 @@ final class AppState: ObservableObject {
         let mergedTickets = mergedTicketsPreservingActiveWork(newTickets)
         tickets = mergedTickets
         projects = Self.rebuildProjects(from: mergedTickets)
+        recoverCompletedWorkHistoryIfNeeded()
         if let selectedTicketID {
             selectedTicket = mergedTickets.first(where: { $0.id == selectedTicketID })
         }
@@ -338,9 +383,100 @@ final class AppState: ObservableObject {
     func mergedTicketsPreservingActiveWork(_ syncedTickets: [Ticket]) -> [Ticket] {
         let syncedTicketIDs = Set(syncedTickets.map(\.id))
         let retainedTickets = tickets.filter { ticket in
-            !syncedTicketIDs.contains(ticket.id) && activeWorkItem(for: ticket.id) != nil
+            guard !syncedTicketIDs.contains(ticket.id) else { return false }
+            if ticket.isLocalTest { return true }
+            if activeWorkItem(for: ticket.id) != nil { return true }
+            if planningSession(for: ticket.id) != nil { return true }
+            return hasCompletedWorkItem(for: ticket.id)
         }
         return syncedTickets + retainedTickets
+    }
+
+    @discardableResult
+    func createLocalTestTicket(
+        title: String,
+        description: String,
+        priority: TicketPriority = .normal,
+        kind: TicketKind = .bug
+    ) -> Ticket? {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else { return nil }
+
+        let project = resolveProjectForLocalTestTicket()
+        if projects.first(where: { $0.id == project.id }) == nil {
+            projects.append(project)
+            projects.sort { $0.name < $1.name }
+        }
+
+        let nextID = nextLocalTestTicketID()
+        let ticket = Ticket(
+            id: nextID,
+            projectID: project.id,
+            projectName: project.name,
+            kind: kind,
+            priority: priority,
+            status: .new,
+            title: trimmedTitle,
+            description: description.trimmingCharacters(in: .whitespacesAndNewlines),
+            targetVersion: "test",
+            updatedAt: Date(),
+            assignee: "本地测试",
+            sourceURL: nil,
+            author: "本地测试",
+            isLocalTest: true
+        )
+        tickets.insert(ticket, at: 0)
+        persistState()
+        return ticket
+    }
+
+    func deleteLocalTestTicket(id: Int) {
+        guard let index = tickets.firstIndex(where: { $0.id == id && $0.isLocalTest }) else { return }
+        guard activeWorkItem(for: id) == nil else { return }
+        tickets.remove(at: index)
+        if selectedTicket?.id == id {
+            closeTicketModal()
+            selectedTicket = nil
+        }
+        projects = Self.rebuildProjects(from: tickets)
+        // 若仓库仍引用某项目，保留项目列表中对应项
+        for repository in repositories where projects.first(where: { $0.id == repository.projectID }) == nil {
+            projects.append(
+                Project(
+                    id: repository.projectID,
+                    name: repository.displayName,
+                    symbol: Self.projectSymbol(for: repository.displayName)
+                )
+            )
+        }
+        projects.sort { $0.name < $1.name }
+        persistState()
+    }
+
+    private func nextLocalTestTicketID() -> Int {
+        let maxLocal = tickets.filter(\.isLocalTest).map(\.id).max() ?? (Self.localTestTicketIDBase - 1)
+        return max(Self.localTestTicketIDBase, maxLocal + 1)
+    }
+
+    private func resolveProjectForLocalTestTicket() -> Project {
+        if let selectedProjectID,
+           let selected = projects.first(where: { $0.id == selectedProjectID }) {
+            return selected
+        }
+        if let repository = repositories.first(where: \.isDefault) ?? repositories.first {
+            if let existing = projects.first(where: { $0.id == repository.projectID }) {
+                return existing
+            }
+            return Project(
+                id: repository.projectID,
+                name: repository.displayName,
+                symbol: Self.projectSymbol(for: repository.displayName)
+            )
+        }
+        if let first = projects.first {
+            return first
+        }
+        return Project(id: "local-test", name: "本地测试", symbol: "flask")
     }
 
     func markLoginRequired() {
@@ -359,7 +495,43 @@ final class AppState: ObservableObject {
         persistState()
     }
 
+    func planningSession(for ticketID: Int) -> RequirementPlanSession? {
+        planningSessions.last { $0.ticketID == ticketID }
+    }
+
+    func boardStatusTitle(for ticket: Ticket) -> String {
+        if planningSession(for: ticket.id)?.awaitsUserConfirmation == true {
+            return "待确认"
+        }
+        if let item = activeWorkItem(for: ticket.id), !item.stage.requiresUserApproval {
+            return TicketStatus.processing.rawValue
+        }
+        return ticket.status.rawValue
+    }
+
+    func boardActionTitle(for ticket: Ticket) -> String {
+        if planningSession(for: ticket.id)?.awaitsUserConfirmation == true {
+            return "去确认"
+        }
+        return ticket.kind.boardActionTitle
+    }
+
+    func addOrUpdate(planningSession: RequirementPlanSession) {
+        if let index = planningSessions.firstIndex(where: { $0.id == planningSession.id }) {
+            planningSessions[index] = planningSession
+        } else {
+            planningSessions.append(planningSession)
+        }
+        persistState()
+    }
+
+    func removePlanningSession(ticketID: Int) {
+        planningSessions.removeAll { $0.ticketID == ticketID }
+        persistState()
+    }
+
     func persistState() {
+        AgentCredentialStore.saveAPIKey(agentAPIKey)
         let lastSyncedAt: Date? = {
             if case let .synced(date) = syncStatus { return date }
             return nil
@@ -369,12 +541,19 @@ final class AppState: ObservableObject {
                 tickets: tickets,
                 repositories: repositories,
                 workItems: workItems,
+                planningSessions: planningSessions,
                 knowledgeBaseURL: knowledgeBaseURL,
                 defaultTestAssignee: defaultTestAssignee,
                 syncIntervalHours: clampedAutoSyncIntervalHours,
                 hasAuthenticatedSession: hasAuthenticatedSession,
                 lastSyncedAt: lastSyncedAt,
-                aiProviderOrder: orderedAIProviders
+                aiProviderOrder: orderedAIProviders,
+                isTestModeEnabled: isTestModeEnabled,
+                agentAPIURL: agentAPIURL,
+                agentAPIKey: "",
+                agentModelID: agentModelID,
+                agentSystemPrompt: agentSystemPrompt,
+                customAIProviders: customAIProviders
             )
         )
     }
@@ -440,13 +619,87 @@ final class AppState: ObservableObject {
         projects = Self.rebuildProjects(from: snapshot.tickets)
         repositories = snapshot.repositories
         workItems = snapshot.workItems
+        planningSessions = snapshot.planningSessions
         knowledgeBaseURL = KnowledgeBaseQuery.migratedURL(snapshot.knowledgeBaseURL)
         defaultTestAssignee = snapshot.defaultTestAssignee
         autoSyncIntervalHours = min(8, max(1, snapshot.syncIntervalHours))
         hasAuthenticatedSession = snapshot.hasAuthenticatedSession
         aiProviderOrder = AIProvider.normalizedOrder(snapshot.aiProviderOrder)
+        isTestModeEnabled = snapshot.isTestModeEnabled
+        agentAPIURL = snapshot.agentAPIURL
+        agentAPIKey = AgentCredentialStore.loadAPIKey()
+        if agentAPIKey.isEmpty, !snapshot.agentAPIKey.isEmpty {
+            agentAPIKey = snapshot.agentAPIKey
+            AgentCredentialStore.saveAPIKey(agentAPIKey)
+        }
+        agentModelID = snapshot.agentModelID
+        agentSystemPrompt = snapshot.agentSystemPrompt
+        customAIProviders = snapshot.customAIProviders
+        if customAIProviders.isEmpty, !agentAPIURL.isEmpty {
+            let migratedProvider = CustomAIProviderConfig(
+                name: "默认自定义模型",
+                apiURL: agentAPIURL,
+                modelIDs: agentModelID.isEmpty ? [] : [agentModelID],
+                selectedModelID: agentModelID,
+                systemPrompt: agentSystemPrompt
+            )
+            customAIProviders = [migratedProvider]
+            if !agentAPIKey.isEmpty {
+                AgentCredentialStore.saveAPIKey(agentAPIKey, for: migratedProvider.id)
+            }
+        }
         syncStatus = snapshot.lastSyncedAt.map(SyncStatus.synced)
-            ?? (hasAuthenticatedSession || !tickets.isEmpty ? .idle : .loginRequired)
+            ?? (hasAuthenticatedSession || !tickets.isEmpty || isTestModeEnabled ? .idle : .loginRequired)
+        recoverInterruptedPlanningSessions()
+        recoverCompletedWorkHistoryIfNeeded()
+    }
+
+    /// 拆解进行到一半时退出：回到可重试状态，避免一直停在「生成中」。
+    func recoverInterruptedPlanningSessions() {
+        var changed = false
+        for index in planningSessions.indices where planningSessions[index].phase == .compiling {
+            planningSessions[index].recoverIfInterrupted()
+            changed = true
+        }
+        if changed { persistState() }
+    }
+
+    /// 任务记录丢失时，用本地 Jobs 目录补回已交付工单的流程历史。
+    func recoverCompletedWorkHistoryIfNeeded() {
+        let ticketIDsMissingHistory = Set(
+            tickets.compactMap { ticket -> Int? in
+                guard ticket.status == .testing || ticket.status == .completed else { return nil }
+                guard !workItems.contains(where: { $0.ticketID == ticket.id }) else { return nil }
+                return ticket.id
+            }
+        )
+        guard !ticketIDsMissingHistory.isEmpty else { return }
+        let recovered = JobHistoryRecovery.recoverWorkItems(forTicketIDs: ticketIDsMissingHistory)
+        guard !recovered.isEmpty else { return }
+        workItems.append(contentsOf: recovered)
+        persistState()
+    }
+
+    private static func placeholderTicket(forCompletedWork item: WorkItem) -> Ticket {
+        let summary = item.report?.summary.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = summary.split(separator: "\n", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+            ?? "工单 #\(item.ticketID)"
+        return Ticket(
+            id: item.ticketID,
+            projectID: "completed-history",
+            projectName: "已完成",
+            kind: .task,
+            priority: .normal,
+            status: .completed,
+            title: title,
+            description: "该工单已不在当前知识库列表中，仍可查看本地交付记录。",
+            targetVersion: "",
+            updatedAt: item.updatedAt,
+            assignee: "",
+            sourceURL: nil
+        )
     }
 
     private static func rebuildProjects(from tickets: [Ticket]) -> [Project] {

@@ -15,7 +15,7 @@ struct TicketCardView: View {
     }
 
     private var priorityAccentColor: Color {
-        ticket.priority.color.opacity(ticket.priority == .normal ? 0.45 : 0.82)
+        ticket.priority.color.opacity(ticket.priority == .normal ? 0.72 : 0.82)
     }
 
     private var displayStatus: TicketStatus {
@@ -24,6 +24,13 @@ struct TicketCardView: View {
             return .processing
         }
         return ticket.status
+    }
+
+    private var boardStatusColor: Color {
+        if appState.planningSession(for: ticket.id)?.awaitsUserConfirmation == true {
+            return DevFlowTheme.warning
+        }
+        return displayStatus.color
     }
 
     var body: some View {
@@ -52,6 +59,10 @@ struct TicketCardView: View {
 
                 TagPill(text: ticket.priority.rawValue, color: ticket.priority.color, emphasized: true)
 
+                if ticket.isLocalTest {
+                    TagPill(text: "测试", color: DevFlowTheme.warning, emphasized: true)
+                }
+
                 Spacer(minLength: 8)
 
                 Text(ticket.projectName)
@@ -76,7 +87,7 @@ struct TicketCardView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack {
-                TagPill(text: displayStatus.rawValue, color: displayStatus.color)
+                TagPill(text: appState.boardStatusTitle(for: ticket), color: boardStatusColor)
                 Spacer()
                 Text(ticket.targetVersion)
                     .font(.system(size: 12, weight: .medium))
@@ -94,6 +105,15 @@ struct TicketCardView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer()
+                if ticket.isLocalTest,
+                   appState.isTestModeEnabled,
+                   appState.activeWorkItem(for: ticket.id) == nil,
+                   appState.destination != .processing {
+                    Button("删除") {
+                        appState.deleteLocalTestTicket(id: ticket.id)
+                    }
+                    .buttonStyle(CardActionButtonStyle())
+                }
                 if ticket.status != .testing {
                     if appState.destination == .processing {
                         Button("移除") {
@@ -101,7 +121,7 @@ struct TicketCardView: View {
                         }
                         .buttonStyle(CardActionButtonStyle())
                     } else {
-                        Button(ticket.kind.prefersExternalAgentClient ? "去处理" : "去解决") {
+                        Button(appState.boardActionTitle(for: ticket)) {
                             appState.open(ticket: ticket, focusSolve: true)
                         }
                         .buttonStyle(CardActionButtonStyle())
@@ -130,7 +150,7 @@ struct TicketCardView: View {
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.14), value: hovering)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(ticket.kind.rawValue) \(ticket.issueNumber)，\(ticket.title)，\(ticket.priority.rawValue)，\(displayStatus.rawValue)")
+        .accessibilityLabel("\(ticket.kind.rawValue) \(ticket.issueNumber)，\(ticket.title)，\(ticket.priority.rawValue)，\(appState.boardStatusTitle(for: ticket))")
         .accessibilityAction(named: "查看详情") { appState.open(ticket: ticket) }
     }
 }
@@ -151,10 +171,17 @@ struct TicketListRow: View {
         return ticket.status
     }
 
+    private var boardStatusColor: Color {
+        if appState.planningSession(for: ticket.id)?.awaitsUserConfirmation == true {
+            return DevFlowTheme.warning
+        }
+        return displayStatus.color
+    }
+
     var body: some View {
         HStack(spacing: 14) {
             RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(ticket.priority.color.opacity(ticket.priority == .normal ? 0.35 : 0.88))
+                .fill(ticket.priority.color.opacity(ticket.priority == .normal ? 0.78 : 0.88))
                 .frame(width: 4, height: 44)
 
             VStack(alignment: .leading, spacing: 6) {
@@ -188,7 +215,10 @@ struct TicketListRow: View {
                 HStack(spacing: 8) {
                     TagPill(text: ticket.kind.rawValue, color: ticket.kind.color)
                     TagPill(text: ticket.priority.rawValue, color: ticket.priority.color)
-                    TagPill(text: displayStatus.rawValue, color: displayStatus.color)
+                    TagPill(text: appState.boardStatusTitle(for: ticket), color: boardStatusColor)
+                    if ticket.isLocalTest {
+                        TagPill(text: "测试", color: DevFlowTheme.warning)
+                    }
                     Text(ticket.targetVersion)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
@@ -199,6 +229,15 @@ struct TicketListRow: View {
                 }
             }
 
+            if ticket.isLocalTest,
+               appState.isTestModeEnabled,
+               appState.activeWorkItem(for: ticket.id) == nil,
+               appState.destination != .processing {
+                Button("删除") {
+                    appState.deleteLocalTestTicket(id: ticket.id)
+                }
+                .buttonStyle(CardActionButtonStyle())
+            }
             if ticket.status != .testing {
                 if appState.destination == .processing {
                     Button("移除") {
@@ -206,7 +245,7 @@ struct TicketListRow: View {
                     }
                     .buttonStyle(CardActionButtonStyle())
                 } else {
-                    Button(ticket.kind.prefersExternalAgentClient ? "去处理" : "去解决") {
+                    Button(appState.boardActionTitle(for: ticket)) {
                         appState.open(ticket: ticket, focusSolve: true)
                     }
                     .buttonStyle(CardActionButtonStyle())

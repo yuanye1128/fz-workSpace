@@ -424,3 +424,76 @@ final class DurableProcessRunner: @unchecked Sendable {
         return errno == EPERM
     }
 }
+
+enum JobHistoryRecovery {
+    static func recoverWorkItems(forTicketIDs ticketIDs: Set<Int>) -> [WorkItem] {
+        guard !ticketIDs.isEmpty else { return [] }
+        let jobsRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("DevFlow", isDirectory: true)
+            .appendingPathComponent("Jobs", isDirectory: true)
+        guard let directories = try? FileManager.default.contentsOfDirectory(
+            at: jobsRoot,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        var latest: [Int: (date: Date, item: WorkItem)] = [:]
+        for directory in directories {
+            guard let recovered = recoverWorkItem(from: directory),
+                  ticketIDs.contains(recovered.ticketID) else { continue }
+            let date = (try? directory.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if date >= (latest[recovered.ticketID]?.date ?? .distantPast) {
+                latest[recovered.ticketID] = (date, recovered)
+            }
+        }
+        return latest.values.map(\.item)
+    }
+
+    private static func recoverWorkItem(from directory: URL) -> WorkItem? {
+        let files = DurableExecutionFiles(runDirectory: directory)
+        guard let configuration = files.readJSON(DurableWorkerConfiguration.self, from: files.configurationURL) else {
+            return nil
+        }
+        let blob = configuration.arguments.joined(separator: "\n")
+        guard let ticketID = ticketID(in: blob) else { return nil }
+        let plan = extractedPlan(from: blob)
+        let modified = (try? directory.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
+        return WorkItem(
+            ticketID: ticketID,
+            provider: provider(from: configuration.executable),
+            repositoryPath: configuration.workingDirectory,
+            branch: "",
+            helperContext: "",
+            stage: .completed,
+            logs: [JobLogEntry(timestamp: modified, message: "已从本地执行记录恢复任务历史")],
+            analysisPlan: plan,
+            updatedAt: modified
+        )
+    }
+
+    private static func ticketID(in text: String) -> Int? {
+        guard let regex = try? NSRegularExpression(pattern: #"工单编号：#(\d+)"#) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, range: range),
+              let idRange = Range(match.range(at: 1), in: text) else { return nil }
+        return Int(text[idRange])
+    }
+
+    private static func extractedPlan(from text: String) -> String? {
+        guard let start = text.range(of: "DEVFLOW_PLAN:") else { return nil }
+        let rest = text[start.lowerBound...]
+        if let end = rest.range(of: "\nDEVFLOW_RISKS:") {
+            let plan = rest[..<end.lowerBound].trimmingCharacters(in: .whitespacesAndNewlines)
+            return plan.isEmpty ? nil : String(plan)
+        }
+        let plan = rest.trimmingCharacters(in: .whitespacesAndNewlines)
+        return plan.isEmpty ? nil : plan
+    }
+
+    private static func provider(from executable: String) -> AIProvider {
+        let name = URL(fileURLWithPath: executable).lastPathComponent.lowercased()
+        if name.contains("cursor") { return .cursor }
+        if name.contains("claude") { return .claude }
+        return .codex
+    }
+}

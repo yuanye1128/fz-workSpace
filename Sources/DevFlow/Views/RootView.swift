@@ -40,6 +40,8 @@ struct RootView: View {
                     switch appState.destination {
                     case .repositories:
                         RepositoryConfigView()
+                    case .agent:
+                        AgentChatView()
                     case .settings:
                         SettingsView()
                     default:

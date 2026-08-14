@@ -25,6 +25,10 @@ final class DevFlowTests: XCTestCase {
         XCTAssertFalse(state.needsLogin)
 
         state.tickets = []
+        XCTAssertTrue(state.needsLogin || state.isTestModeEnabled)
+        state.isTestModeEnabled = false
+        state.hasAuthenticatedSession = false
+        state.tickets = []
         XCTAssertTrue(state.needsLogin)
     }
 
@@ -49,6 +53,7 @@ final class DevFlowTests: XCTestCase {
         let staleTicket = SampleData.tickets[1]
         let syncedTicket = SampleData.tickets[4]
         state.tickets = [activeTicket, staleTicket]
+        state.planningSessions = []
         state.workItems = [
             WorkItem(
                 ticketID: activeTicket.id,
@@ -70,6 +75,184 @@ final class DevFlowTests: XCTestCase {
         XCTAssertFalse(merged.contains(where: { $0.id == staleTicket.id }))
     }
 
+    @MainActor
+    func testCompletedDestinationShowsWorkItemEvenIfTicketLeftAssignedList() {
+        let state = AppState()
+        let delivered = SampleData.tickets[0]
+        let other = SampleData.tickets[4]
+        state.tickets = []
+        state.workItems = [
+            WorkItem(
+                ticketID: delivered.id,
+                provider: .cursor,
+                repositoryPath: "/tmp/repository",
+                branch: "main",
+                helperContext: "",
+                stage: .completed,
+                logs: [],
+                report: AIReport(
+                    summary: "修复了详情跳转",
+                    reasoning: "",
+                    changedFiles: [],
+                    tests: [],
+                    risks: [],
+                    diff: "",
+                    rawOutput: ""
+                )
+            )
+        ]
+        state.destination = .completed
+
+        XCTAssertEqual(state.destinationCount(.completed), 1)
+        XCTAssertEqual(state.filteredTickets.map(\.id), [delivered.id])
+        XCTAssertEqual(state.filteredTickets.first?.title, "修复了详情跳转")
+
+        state.tickets = [delivered]
+        state.tickets[0].status = .testing
+        let merged = state.mergedTicketsPreservingActiveWork([other])
+        XCTAssertEqual(Set(merged.map(\.id)), Set([other.id, delivered.id]))
+
+        state.tickets = merged
+        state.filters.status = .completed
+        XCTAssertEqual(state.filteredTickets.map(\.id), [delivered.id])
+    }
+
+    @MainActor
+    func testAssignedTestingTicketsAppearInCompletedUntilTransferred() {
+        let state = AppState()
+        var ticket = SampleData.tickets[0]
+        ticket.status = .testing
+        state.tickets = [ticket]
+        state.workItems = []
+        state.destination = .completed
+        state.filters = TicketFilters()
+        state.searchText = ""
+
+        XCTAssertEqual(state.filteredTickets.map(\.id), [ticket.id])
+        XCTAssertEqual(state.destinationCount(.completed), 1)
+
+        state.tickets = []
+        XCTAssertTrue(state.filteredTickets.isEmpty)
+        XCTAssertEqual(state.destinationCount(.completed), 0)
+    }
+
+    func testJobStageDecodesLegacyMergingName() throws {
+        let data = Data("\"合并回目标分支\"".utf8)
+        let stage = try JSONDecoder().decode(JobStage.self, from: data)
+        XCTAssertEqual(stage, .merging)
+    }
+
+    @MainActor
+    func testLocalTestTicketSurvivesSyncWithoutActiveWork() {
+        let state = AppState()
+        state.isTestModeEnabled = true
+        state.planningSessions = []
+        let existingIDs = Set(state.tickets.map(\.id))
+        let created = state.createLocalTestTicket(
+            title: "假 Bug：空指针",
+            description: "用于本地联调",
+            priority: .high
+        )
+        XCTAssertNotNil(created)
+        XCTAssertEqual(created?.kind, .bug)
+        XCTAssertTrue(created?.isLocalTest == true)
+        XCTAssertNil(created?.sourceURL)
+        XCTAssertGreaterThanOrEqual(created?.id ?? 0, AppState.localTestTicketIDBase)
+        XCTAssertFalse(state.needsLogin)
+
+        let synced = SampleData.tickets[4]
+        let merged = state.mergedTicketsPreservingActiveWork([synced])
+        XCTAssertTrue(merged.contains(where: { $0.id == created!.id && $0.isLocalTest }))
+        XCTAssertTrue(merged.contains(where: { $0.id == synced.id }))
+        XCTAssertTrue(Set(merged.map(\.id)).isSuperset(of: [synced.id, created!.id]))
+        XCTAssertTrue(merged.filter(\.isLocalTest).map(\.id).allSatisfy { existingIDs.contains($0) || $0 == created!.id })
+    }
+
+    @MainActor
+    func testLocalTestTicketCanSelectRequirementKind() {
+        let state = AppState()
+        state.isTestModeEnabled = true
+        let created = state.createLocalTestTicket(
+            title: "假需求：批量禁用",
+            description: "用于验证需求拆解",
+            priority: .high,
+            kind: .feature
+        )
+        XCTAssertEqual(created?.kind, .feature)
+        XCTAssertTrue(created?.isLocalTest == true)
+        XCTAssertEqual(created?.kind.executionMode, .requirementPlanning)
+    }
+
+    @MainActor
+    func testDeleteLocalTestTicketBlockedWhenActive() {
+        let state = AppState()
+        state.isTestModeEnabled = true
+        let created = state.createLocalTestTicket(title: "不可删进行中", description: "x", priority: .normal)!
+        state.workItems = [
+            WorkItem(
+                ticketID: created.id,
+                provider: .cursor,
+                repositoryPath: "/tmp/repository",
+                branch: "main",
+                helperContext: "",
+                stage: .runningAI,
+                logs: []
+            )
+        ]
+        state.deleteLocalTestTicket(id: created.id)
+        XCTAssertTrue(state.tickets.contains(where: { $0.id == created.id }))
+
+        state.workItems = []
+        state.deleteLocalTestTicket(id: created.id)
+        XCTAssertFalse(state.tickets.contains(where: { $0.id == created.id }))
+    }
+
+    func testTicketDecodesWithoutLocalTestFlag() throws {
+        let json = """
+        {
+          "id": 42,
+          "projectID": "ops",
+          "projectName": "运营后台",
+          "kind": "Bug",
+          "priority": "普通",
+          "status": "新建",
+          "title": "旧工单",
+          "description": "desc",
+          "targetVersion": "v1",
+          "updatedAt": "2024-01-01T00:00:00Z",
+          "assignee": "tester"
+        }
+        """.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let ticket = try decoder.decode(Ticket.self, from: json)
+        XCTAssertFalse(ticket.isLocalTest)
+    }
+
+    @MainActor
+    func testSuggestedCommitMessagePrefersTicketTitleOverFileCentricSummary() {
+        let ticket = Ticket(
+            id: 9_000_002,
+            projectID: "ops",
+            projectName: "运营后台",
+            kind: .bug,
+            priority: .high,
+            status: .new,
+            title: "统计上报提交失败导致数据丢失",
+            description: "在特定条件下 statistics transform 提交失败",
+            targetVersion: "test",
+            updatedAt: Date(),
+            assignee: "本地测试",
+            sourceURL: nil,
+            isLocalTest: true
+        )
+        let message = ticket.suggestedCommitMessage(
+            summary: "在 `plugins/core/lib/statistics/statistics_transform.dart` 的 `_submitUseD` 增加空值保护"
+        )
+        XCTAssertEqual(message, "fix: #9000002 统计上报提交失败导致数据丢失")
+        XCTAssertFalse(message.contains("statistics_transform"))
+    }
+
     func testKnowledgeBaseQueryRemovesSinglePageAndMigratesLegacyDefault() {
         let paged = "https://kb.fzyun.net/issues?assigned_to_id=424&page=3&set_filter=1&sort=priority%3Adesc%2Cupdated_on%3Adesc"
         let allPages = KnowledgeBaseQuery.allPagesURL(paged)
@@ -86,6 +269,69 @@ final class DevFlowTests: XCTestCase {
             TicketKind.allCases.map(\.rawValue),
             ["Bug", "需求", "建议", "支持", "任务"]
         )
+        XCTAssertEqual(TicketKind.feature.executionMode, .requirementPlanning)
+        XCTAssertEqual(TicketKind.task.executionMode, .externalAgent)
+        XCTAssertEqual(TicketKind.bug.executionMode, .inAppPipeline)
+        XCTAssertEqual(TicketKind.feature.boardActionTitle, "去处理")
+        XCTAssertEqual(TicketKind.bug.boardActionTitle, "去解决")
+        XCTAssertFalse(TicketKind.feature.prefersExternalAgentClient)
+        XCTAssertTrue(TicketKind.task.prefersExternalAgentClient)
+    }
+
+    @MainActor
+    func testRequirementPlanningCardShowsPendingConfirmationWhenAwaitingUser() {
+        var session = RequirementPlanSession(
+            ticketID: 18425,
+            intensity: .medium,
+            provider: .cursor,
+            repositoryPath: "/tmp/repo",
+            branch: "main",
+            helperContext: "",
+            phase: .compiling
+        )
+        XCTAssertFalse(session.awaitsUserConfirmation)
+
+        session.phase = .questioning
+        XCTAssertTrue(session.awaitsUserConfirmation)
+        session.phase = .ready
+        XCTAssertTrue(session.awaitsUserConfirmation)
+        session.phase = .failed
+        XCTAssertFalse(session.awaitsUserConfirmation)
+
+        let state = AppState()
+        let ticket = SampleData.tickets.first { $0.id == 18425 }!
+        state.tickets = [ticket]
+        XCTAssertEqual(state.boardStatusTitle(for: ticket), "新建")
+        XCTAssertEqual(state.boardActionTitle(for: ticket), "去处理")
+
+        session.phase = .compiling
+        state.planningSessions = [session]
+        XCTAssertEqual(state.boardStatusTitle(for: ticket), "新建")
+        XCTAssertEqual(state.boardActionTitle(for: ticket), "去处理")
+
+        var processingTicket = ticket
+        processingTicket.status = .processing
+        state.tickets = [processingTicket]
+        XCTAssertEqual(state.boardStatusTitle(for: processingTicket), "处理中")
+
+        session.phase = .questioning
+        state.planningSessions = [session]
+        XCTAssertEqual(state.boardStatusTitle(for: processingTicket), "待确认")
+        XCTAssertEqual(state.boardActionTitle(for: processingTicket), "去确认")
+
+        session.phase = .ready
+        state.planningSessions = [session]
+        XCTAssertEqual(state.boardStatusTitle(for: processingTicket), "待确认")
+        XCTAssertEqual(state.boardActionTitle(for: processingTicket), "去确认")
+    }
+
+    func testRequirementPlanningIntensityQuestionRanges() {
+        XCTAssertEqual(RequirementPlanningIntensity.low.questionRange, 3...5)
+        XCTAssertEqual(RequirementPlanningIntensity.medium.questionRange, 5...8)
+        XCTAssertEqual(RequirementPlanningIntensity.high.questionRange, 10...10)
+        XCTAssertEqual(RequirementPlanningIntensity.medium.clampedQuestionTotal(3), 5)
+        XCTAssertEqual(RequirementPlanningIntensity.medium.clampedQuestionTotal(9), 8)
+        XCTAssertEqual(RequirementPlanningIntensity.high.clampedQuestionTotal(7), 10)
     }
 
     func testLegacySnapshotDefaultsAutoSyncInterval() throws {
@@ -106,6 +352,7 @@ final class DevFlowTests: XCTestCase {
 
         XCTAssertEqual(snapshot.syncIntervalHours, 2)
         XCTAssertEqual(snapshot.aiProviderOrder, [.cursor, .codex, .claude])
+        XCTAssertTrue(snapshot.planningSessions.isEmpty)
     }
 
     func testAIProviderDefaultOrderPutsCursorFirst() {
@@ -493,13 +740,16 @@ final class DevFlowTests: XCTestCase {
         let branchAfterMergeWT = try await service.currentBranch(at: repo.path)
         XCTAssertEqual(branchAfterMergeWT, "feature")
 
-        let merge = try await service.mergeBranch(
+        let merge = try await service.squashMergeBranch(
             "devflow/task-1",
             intoCheckoutAt: mergeWT,
-            message: "Merge task into main"
+            message: "fix: #1 task-change"
         )
         XCTAssertTrue(merge.success)
         XCTAssertNotNil(merge.mergedCommitHash)
+        let log = try runGit(["log", "-1", "--pretty=%s"], at: mergeWT)
+        XCTAssertEqual(log, "fix: #1 task-change")
+        XCTAssertFalse(log.lowercased().contains("merge"))
 
         try await service.pushHEAD(toRemoteBranch: "main", remote: "origin", at: mergeWT)
         let branchAfterPush = try await service.currentBranch(at: repo.path)
@@ -534,15 +784,176 @@ final class DevFlowTests: XCTestCase {
             mergeBranch: "devflow/merge-2",
             worktreePath: mergeWT2
         )
-        let conflicted = try await service.mergeBranch(
+        let conflicted = try await service.squashMergeBranch(
             "devflow/task-2",
             intoCheckoutAt: mergeWT2,
-            message: "Merge task2"
+            message: "fix: #2 conflict"
         )
         XCTAssertFalse(conflicted.success)
-        XCTAssertTrue(conflicted.conflicts.contains("value.txt"))
+        XCTAssertEqual(conflicted.conflicts.contains("value.txt"), true)
         let branchFinal = try await service.currentBranch(at: repo.path)
         XCTAssertEqual(branchFinal, "feature")
+    }
+
+    func testRequirementPlanningPromptAsksOneQuestionAndKeepsAssumptions() {
+        let ticket = SampleData.tickets.first { $0.kind == .feature }!
+        let prompt = PromptBuilder.buildRequirementPlanning(
+            ticket: ticket,
+            helperContext: "只做后台接口",
+            intensity: .medium,
+            askedCount: 0,
+            questionTotal: nil,
+            messages: [],
+            finishNow: false
+        )
+        XCTAssertTrue(prompt.contains("每次回复只能做一件事"))
+        XCTAssertTrue(prompt.contains("不要再确认"))
+        XCTAssertTrue(prompt.contains("DEVFLOW_PLANNING_QUESTION:"))
+        XCTAssertTrue(prompt.contains("DEVFLOW_PLAN_DOCUMENT:"))
+        XCTAssertTrue(prompt.contains("验收清单"))
+        XCTAssertTrue(prompt.contains("明确不做"))
+        XCTAssertTrue(prompt.contains("题数不固定"))
+        XCTAssertTrue(prompt.contains("必须继续问"))
+        XCTAssertTrue(prompt.contains("合并成一个问题"))
+        XCTAssertTrue(prompt.contains("资深工程师交给普通开发"))
+        XCTAssertTrue(prompt.contains("改动范围"))
+        XCTAssertTrue(prompt.contains("分步实现"))
+        XCTAssertTrue(prompt.contains("只做后台接口"))
+        XCTAssertFalse(PromptBuilder.hasRequiredProtocolMarkers(prompt, phase: .planning))
+    }
+
+    func testRequirementPlanningTurnParserAcceptsSingleQuestionAndDocument() {
+        let question = """
+        DEVFLOW_PLANNING_QUESTION:
+        批量禁用是否需要二次确认？
+        DEVFLOW_QUESTION_INDEX: 1
+        DEVFLOW_QUESTION_TOTAL: 6
+        """
+        XCTAssertEqual(
+            PromptBuilder.parseRequirementPlanningTurn(question),
+            .question(text: "批量禁用是否需要二次确认？", index: 1, total: 6)
+        )
+
+        let combined = """
+        DEVFLOW_PLANNING_QUESTION:
+        是否需要二次确认？权限失败怎么提示？
+        DEVFLOW_QUESTION_INDEX: 2
+        """
+        XCTAssertEqual(
+            PromptBuilder.parseRequirementPlanningTurn(combined),
+            .question(text: "是否需要二次确认？权限失败怎么提示？", index: 2, total: nil)
+        )
+
+        let document = """
+        DEVFLOW_PLAN_DOCUMENT:
+        # 需求描述
+        支持按条件批量禁用用户。
+        ## 验收清单
+        ### 核心流程
+        - [ ] 能按筛选结果批量禁用
+        ### 异常情况
+        - [ ] 无权限时提示失败
+        ### 空状态
+        - [ ] 无匹配用户时禁用按钮不可用
+        ### 加载状态
+        - [ ] 提交中显示进度
+        ### 不同设备适配
+        - [ ] 窄屏操作区不遮挡
+        ## 假设
+        - 仅管理员可操作
+        ## 本次范围
+        - 列表批量禁用
+        ## 明确不做
+        - 不做跨项目同步
+        ## 开发计划
+        ### 改动范围
+        - 复用现有用户列表筛选；新增批量禁用接口
+        ### 分步实现
+        1. 增加批量禁用接口
+           - 做法：在 UserController 增加批量接口，校验管理员权限，按 id 列表更新禁用状态
+           - 涉及：UserController、UserService
+           - 验证：无权限返回 403；空列表拒绝
+        2. 列表入口
+           - 做法：筛选结果页增加批量禁用，二次确认后调用接口并刷新
+           - 涉及：UserListPage
+           - 验证：未选中时按钮不可用
+        ### 注意点
+        - 先接口后前端；不要改单用户禁用逻辑
+        """
+        XCTAssertTrue(PromptBuilder.hasRequiredProtocolMarkers(document, phase: .planning))
+        if case let .document(parsed) = PromptBuilder.parseRequirementPlanningTurn(document) {
+            XCTAssertTrue(parsed.contains("支持按条件批量禁用用户"))
+            XCTAssertTrue(parsed.contains("明确不做"))
+            XCTAssertTrue(parsed.contains("不同设备适配"))
+            XCTAssertTrue(parsed.contains("分步实现"))
+            XCTAssertTrue(parsed.contains("UserController"))
+        } else {
+            XCTFail("expected planning document")
+        }
+
+        let thinPlan = """
+        DEVFLOW_PLAN_DOCUMENT:
+        # 需求描述
+        支持按条件批量禁用用户。
+        ## 验收清单
+        ### 核心流程
+        - [ ] 能按筛选结果批量禁用
+        ### 异常情况
+        - [ ] 无权限时提示失败
+        ### 空状态
+        - [ ] 无匹配用户时禁用按钮不可用
+        ### 加载状态
+        - [ ] 提交中显示进度
+        ### 不同设备适配
+        - [ ] 窄屏操作区不遮挡
+        ## 假设
+        - 仅管理员可操作
+        ## 本次范围
+        - 列表批量禁用
+        ## 明确不做
+        - 不做跨项目同步
+        ## 开发计划
+        1. 增加批量接口与列表入口
+        """
+        XCTAssertNil(PromptBuilder.parseRequirementPlanningTurn(thinPlan))
+    }
+
+    func testExternalAgentTaskFilePrefersDevelopmentDocument() {
+        let ticket = SampleData.tickets.first { $0.kind == .feature }!
+        let markdown = ExternalAgentLauncher.taskFileMarkdown(
+            for: .init(
+                ticket: ticket,
+                repositoryPath: "/tmp/repo",
+                branch: "main",
+                helperContext: "忽略我",
+                provider: .cursor,
+                developmentDocument: "# 需求描述\n按计划实现批量禁用。"
+            )
+        )
+        XCTAssertTrue(markdown.contains("请按下方开发计划直接实施"))
+        XCTAssertTrue(markdown.contains("按计划实现批量禁用"))
+        XCTAssertFalse(markdown.contains("忽略我"))
+    }
+
+    func testInterruptedPlanningSessionBecomesRetryable() {
+        var empty = RequirementPlanSession(
+            ticketID: 18425,
+            intensity: .medium,
+            provider: .cursor,
+            repositoryPath: "/tmp/repo",
+            branch: "main",
+            helperContext: "",
+            phase: .compiling
+        )
+        empty.recoverIfInterrupted()
+        XCTAssertEqual(empty.phase, .failed)
+        XCTAssertEqual(empty.errorMessage, "上次拆解在退出时中断，请重试。")
+
+        var withMessages = empty
+        withMessages.phase = .compiling
+        withMessages.messages = [PlanningMessage(role: .assistant, content: "范围是否包含移动端？")]
+        withMessages.recoverIfInterrupted()
+        XCTAssertEqual(withMessages.phase, .questioning)
     }
 
     private func configureGit(at path: String) throws {

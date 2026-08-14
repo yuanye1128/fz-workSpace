@@ -9,12 +9,15 @@ struct TicketDetailModal: View {
     @State private var branch = ""
     @State private var isLoadingBranch = false
     @State private var provider: AIProvider = .cursor
+    @State private var selectedCustomProviderID: UUID?
     @State private var availableModels: [AIModelOption] = []
     @State private var selectedModelID = ""
     @State private var customModelID = ""
     @State private var selectedReasoningEffort = ""
     @State private var isLoadingModels = false
     @State private var helperContext = ""
+    @State private var planningIntensity: RequirementPlanningIntensity = .medium
+    @State private var planningAnswer = ""
     @State private var showingCloseConfirmation = false
     @State private var isDroppingHelperFiles = false
     @State private var externalLaunchError: String?
@@ -26,7 +29,7 @@ struct TicketDetailModal: View {
     private static let solveConfigPrimaryColumnWidth: CGFloat = 220
     private static let solveConfigColumnSpacing: CGFloat = 30
 
-    private enum Field { case helper }
+    private enum Field { case helper, planningAnswer }
 
     private var repositories: [RepositoryConfig] {
         appState.repositories(for: ticket)
@@ -58,8 +61,28 @@ struct TicketDetailModal: View {
         return availableModels.isEmpty ? selectedReasoningEffort : nil
     }
 
+    private var selectedCustomProvider: CustomAIProviderConfig? {
+        guard let selectedCustomProviderID else { return nil }
+        return appState.customAIProviders.first { $0.id == selectedCustomProviderID }
+    }
+
+    private var isCustomProviderSelected: Bool { selectedCustomProvider != nil }
+
+    private var providerSelectionKey: String {
+        if let selectedCustomProviderID { return "custom:\(selectedCustomProviderID.uuidString)" }
+        return "builtin:\(provider.rawValue)"
+    }
+
     private var prefersExternalAgent: Bool {
         ticket.kind.prefersExternalAgentClient
+    }
+
+    private var usesRequirementPlanning: Bool {
+        ticket.kind.usesRequirementPlanning
+    }
+
+    private var planningSession: RequirementPlanSession? {
+        appState.planningSession(for: ticket.id)
     }
 
     private var workItem: WorkItem? {
@@ -71,11 +94,16 @@ struct TicketDetailModal: View {
     }
 
     private var hasUnsavedInput: Bool {
-        !helperContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || selectedRepositoryID != repositories.first(where: \.isDefault)?.id
+        !helperContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !planningAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || selectedRepositoryID != repositories.first(where: \.isDefault)?.id
     }
 
     private var isShowingConfiguration: Bool {
-        !isTestingTicket && (workItem == nil || workItem?.stage == .cancelled)
+        if usesRequirementPlanning {
+            return !isTestingTicket && planningSession == nil
+        }
+        return !isTestingTicket && (workItem == nil || workItem?.stage == .cancelled)
     }
 
     private var requiresCloseConfirmation: Bool {
@@ -94,7 +122,24 @@ struct TicketDetailModal: View {
             header
             Divider()
 
-            if let workItem, workItem.stage != .cancelled {
+            if usesRequirementPlanning, let session = planningSession {
+                HStack(spacing: 0) {
+                    ScrollView {
+                        ticketInformation
+                            .padding(25)
+                    }
+                    .frame(maxWidth: .infinity)
+                    Divider()
+                    RequirementPlanningSessionView(
+                        ticket: ticket,
+                        session: session,
+                        answer: $planningAnswer,
+                        externalLaunchError: $externalLaunchError,
+                        onHandoffSuccess: { appState.closeTicketModal() }
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+            } else if let workItem, workItem.stage != .cancelled {
                 WorkItemContent(ticket: ticket, item: workItem)
             } else if isTestingTicket {
                 testingDetailContent
@@ -147,6 +192,16 @@ struct TicketDetailModal: View {
                 .background(DevFlowTheme.accent.opacity(0.12), in: Capsule())
                 .padding(.top, 3)
 
+                if ticket.isLocalTest {
+                    Text("测试")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(DevFlowTheme.warning)
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                        .background(DevFlowTheme.warning.opacity(0.14), in: Capsule())
+                        .padding(.top, 3)
+                }
+
                 Text(ticket.title)
                     .font(.system(size: 23, weight: .bold))
                     .lineLimit(2)
@@ -185,6 +240,9 @@ struct TicketDetailModal: View {
 
                         repositoryAndBranchRow
                         providerPicker
+                        if usesRequirementPlanning {
+                            intensityPicker
+                        }
                         helperField
                         actionButtons
                         workflowStrip
@@ -324,22 +382,32 @@ struct TicketDetailModal: View {
 
     private var providerPicker: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(prefersExternalAgent ? "打开到客户端" : "AI 工具")
+            Text(usesRequirementPlanning ? "AI 工具" : (prefersExternalAgent ? "打开到客户端" : "AI 工具"))
                 .font(.system(size: 12, weight: .semibold))
-            if prefersExternalAgent {
-                Text("需求适合多轮沟通，将携带工单上下文打开所选客户端。")
+            if usesRequirementPlanning {
+                Text("先在工作台拆解需求并生成开发计划，再打开所选客户端实施。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            } else if prefersExternalAgent {
+                Text("任务适合多轮沟通，将携带工单上下文打开所选客户端。")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
-            Picker(prefersExternalAgent ? "打开到客户端" : "AI 工具", selection: $provider) {
+            Picker(usesRequirementPlanning ? "AI 工具" : (prefersExternalAgent ? "打开到客户端" : "AI 工具"), selection: Binding(
+                get: { providerSelectionKey },
+                set: { selectProvider($0) }
+            )) {
                 ForEach(appState.orderedAIProviders) { provider in
-                    Text(provider.rawValue).tag(provider)
+                    Text(provider.rawValue).tag("builtin:\(provider.rawValue)")
+                }
+                ForEach(appState.customAIProviders) { custom in
+                    Text(custom.name).tag("custom:\(custom.id.uuidString)")
                 }
             }
             .labelsHidden()
             .pickerStyle(.segmented)
 
-            if !prefersExternalAgent, provider != .cursor {
+            if !prefersExternalAgent, provider != .cursor, !isCustomProviderSelected {
                 if isLoadingModels {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
@@ -413,29 +481,24 @@ struct TicketDetailModal: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(prefersExternalAgent ? "补充上下文" : "辅助 AI 定位")
+                    Text(usesRequirementPlanning ? "需求描述" : (prefersExternalAgent ? "补充上下文" : "辅助 AI 定位"))
                         .font(.system(size: 14, weight: .semibold))
-                    Text(prefersExternalAgent
-                         ? "可补充模块、文件路径或约束，会一并带入外部客户端"
-                         : "补充模块、文件路径或技术约束，帮助 AI 更快找准代码位置")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                    if !usesRequirementPlanning {
+                        Text(prefersExternalAgent
+                             ? "可补充模块、文件路径或约束，会一并带入外部客户端"
+                             : "补充模块、文件路径或技术约束，帮助 AI 更快找准代码位置")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
-                HStack(spacing: 8) {
+                if !usesRequirementPlanning {
                     Button {
                         selectHelperFolder()
                     } label: {
                         Label("选择文件夹", systemImage: "folder")
                     }
                     .buttonStyle(CardActionButtonStyle())
-
-//                    Text("可选")
-//                        .font(.system(size: 11, weight: .medium))
-//                        .foregroundStyle(DevFlowTheme.accent)
-//                        .padding(.horizontal, 8)
-//                        .frame(height: 22)
-//                        .background(DevFlowTheme.accent.opacity(0.12), in: Capsule())
                 }
             }
             PathDropTextEditor(
@@ -445,7 +508,7 @@ struct TicketDetailModal: View {
                     set: { focusedField = $0 ? .helper : nil }
                 ),
                 isDropTargeted: $isDroppingHelperFiles,
-                placeholder: "例如：该功能位于用户管理模块，重点检查 lib/user/profile 目录"
+                placeholder: usesRequirementPlanning ? "" : "例如：该功能位于用户管理模块，重点检查 lib/user/profile 目录"
             )
             .onChange(of: helperContext) { value in
                 if value.count > 500 { helperContext = String(value.prefix(500)) }
@@ -510,7 +573,11 @@ struct TicketDetailModal: View {
         VStack(spacing: 10) {
             Button {
                 guard let selectedRepository else { return }
-                if prefersExternalAgent {
+                if isCustomProviderSelected {
+                    openCustomAgent()
+                } else if usesRequirementPlanning {
+                    startRequirementPlanning(repository: selectedRepository)
+                } else if prefersExternalAgent {
                     openInExternalAgent(repository: selectedRepository)
                 } else {
                     Task {
@@ -526,9 +593,13 @@ struct TicketDetailModal: View {
                     }
                 }
             } label: {
-                Label(
-                    prefersExternalAgent ? "在 \(provider.rawValue) 中打开" : "开始解决",
-                    systemImage: prefersExternalAgent ? "arrow.up.forward.app.fill" : "play.circle.fill"
+                    Label(
+                        isCustomProviderSelected
+                        ? "在 AI Agent 中打开"
+                        : (usesRequirementPlanning ? "开始拆解需求" : (prefersExternalAgent ? "在 \(provider.rawValue) 中打开" : "开始解决")),
+                        systemImage: isCustomProviderSelected
+                        ? "sparkles"
+                        : (usesRequirementPlanning ? "text.badge.checkmark" : (prefersExternalAgent ? "arrow.up.forward.app.fill" : "play.circle.fill"))
                 )
                 .frame(maxWidth: .infinity)
             }
@@ -548,9 +619,15 @@ struct TicketDetailModal: View {
 
     private var workflowStrip: some View {
         VStack(alignment: .leading, spacing: 11) {
-            if prefersExternalAgent {
+            if usesRequirementPlanning {
+                SectionLabel(title: "需求拆解流程")
+                Text("按选定强度澄清关键决策，题数随理解浮动；仍不清楚就继续问。提问结束后整理验收清单与开发计划，再打开外部 Agent 实施。")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if prefersExternalAgent {
                 SectionLabel(title: "外部客户端处理")
-                Text("需求/任务工单会写入 `.devflow/current-task.md` 并打开所选客户端，便于多轮沟通。启动提示已复制到剪贴板。")
+                Text("任务工单会写入 `.devflow/current-task.md` 并打开所选客户端，便于多轮沟通。启动提示已复制到剪贴板。")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -560,6 +637,37 @@ struct TicketDetailModal: View {
             }
         }
         .padding(.top, 5)
+    }
+
+    private var intensityPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("拆解强度")
+                .font(.system(size: 12, weight: .semibold))
+            Picker("拆解强度", selection: $planningIntensity) {
+                ForEach(RequirementPlanningIntensity.allCases) { intensity in
+                    Text(intensity.rawValue).tag(intensity)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            Text("\(planningIntensity.caption)")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func startRequirementPlanning(repository: RepositoryConfig) {
+        appState.requirementPlanner.start(
+            ticket: ticket,
+            repository: repository,
+            branch: branch,
+            provider: provider,
+            modelID: effectiveModelID,
+            reasoningEffort: effectiveReasoningEffort,
+            helperContext: helperContext,
+            intensity: planningIntensity
+        )
     }
 
     private func openInExternalAgent(repository: RepositoryConfig) {
@@ -599,6 +707,32 @@ struct TicketDetailModal: View {
             Task { await loadCurrentBranch() }
         }
         focusedField = .helper
+    }
+
+    private func selectProvider(_ key: String) {
+        if key.hasPrefix("custom:"),
+           let id = UUID(uuidString: String(key.dropFirst("custom:".count))),
+           appState.customAIProviders.contains(where: { $0.id == id }) {
+            selectedCustomProviderID = id
+            availableModels = []
+            selectedModelID = ""
+            customModelID = ""
+            selectedReasoningEffort = ""
+        } else if key.hasPrefix("builtin:"),
+                  let selected = AIProvider(rawValue: String(key.dropFirst("builtin:".count))) {
+            selectedCustomProviderID = nil
+            provider = selected
+        }
+    }
+
+    private func openCustomAgent() {
+        guard let custom = selectedCustomProvider else { return }
+        let additionalContext = helperContext.isEmpty ? "无" : helperContext
+        let context = "请处理以下工单：\n\n标题：\(ticket.title)\n类型：\(ticket.kind.rawValue)\n优先级：\(ticket.priority.rawValue)\n描述：\n\(ticket.displayDescription)\n\n补充信息：\n\(additionalContext)"
+        appState.agentInitialPrompt = context
+        appState.agentSelectedProviderID = custom.id
+        appState.closeTicketModal()
+        appState.select(destination: .agent)
     }
 
     private func loadCurrentBranch() async {
@@ -1107,21 +1241,24 @@ struct JobStageStrip: View {
             ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
                 let reachable = (reachedStepIndex.map { index <= $0 } ?? false)
                 let isSelected = (selectedIndex ?? reachedStepIndex) == index
-                let chip = VStack(spacing: 4) {
+                let chip = VStack(spacing: 5) {
                     Image(systemName: step.symbol)
                         .font(.system(size: 17, weight: .semibold))
                     Text(step.title)
-                        .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
-                        .lineLimit(1)
+                        .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.85)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .foregroundStyle(stepColor(index, selected: isSelected, reachable: reachable))
-                .padding(.horizontal, 30)
-                .padding(.vertical, 15)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity)
                 .background(
                     isSelected && onSelect != nil
                         ? DevFlowTheme.accent.opacity(0.10)
                         : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                 )
                 .contentShape(Rectangle())
                 .opacity(onSelect == nil || reachable ? 1 : 0.45)
@@ -1133,10 +1270,8 @@ struct JobStageStrip: View {
                         chip
                     }
                     .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity)
                 } else {
                     chip
-                        .frame(maxWidth: .infinity)
                 }
 
                 if index < steps.count - 1 {
@@ -1211,7 +1346,7 @@ private struct DeliveryStatusView: View {
         case .pulling:
             ("正在同步目标分支", "拉取远程最新代码…", DevFlowTheme.accent, "arrow.down.circle")
         case .merging:
-            ("正在合并回目标分支", "merge 合回 \(item.branch)…", DevFlowTheme.accent, "arrow.triangle.merge")
+            ("正在合回目标分支", "squash 合回 \(item.branch)…", DevFlowTheme.accent, "arrow.triangle.merge")
         case .pushing:
             ("正在提交代码", "Push 到远程仓库…", DevFlowTheme.accent, "icloud.and.arrow.up")
         case .updatingTicket:

@@ -10,14 +10,107 @@ enum TicketKind: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// 需求/任务更适合在外部 Agent 客户端多轮沟通；其余类型走 App 内自动修复流水线。
-    var prefersExternalAgentClient: Bool {
+    /// 需求在 App 内只做拆解与开发计划；任务直接打开外部客户端；其余走 App 内编码流水线。
+    var executionMode: TicketExecutionMode {
         switch self {
-        case .feature, .task:
-            true
-        case .bug, .suggestion, .support:
-            false
+        case .feature: .requirementPlanning
+        case .task: .externalAgent
+        case .bug, .suggestion, .support: .inAppPipeline
         }
+    }
+
+    var usesRequirementPlanning: Bool { executionMode == .requirementPlanning }
+
+    /// 任务工单直接打开外部 Agent；需求工单在计划就绪后才打开。
+    var prefersExternalAgentClient: Bool { executionMode == .externalAgent }
+
+    var boardActionTitle: String {
+        executionMode == .inAppPipeline ? "去解决" : "去处理"
+    }
+}
+
+enum TicketExecutionMode: Equatable {
+    case inAppPipeline
+    case requirementPlanning
+    case externalAgent
+}
+
+enum RequirementPlanningIntensity: String, Codable, CaseIterable, Identifiable, Sendable {
+    case low = "低"
+    case medium = "中"
+    case high = "高"
+
+    var id: String { rawValue }
+
+    var questionRange: ClosedRange<Int> {
+        switch self {
+        case .low: 3...5
+        case .medium: 5...8
+        case .high: 10...10
+        }
+    }
+
+    var caption: String {
+        switch self {
+        case .low: "建议少问，信息够了就出计划"
+        case .medium: "按理解追问关键决策，题数可增减"
+        case .high: "尽量把方案方向问清楚，不清楚就继续问"
+        }
+    }
+
+    func clampedQuestionTotal(_ proposed: Int) -> Int {
+        min(questionRange.upperBound, max(questionRange.lowerBound, proposed))
+    }
+}
+
+enum PlanningMessageRole: String, Codable, Sendable {
+    case assistant
+    case user
+}
+
+struct PlanningMessage: Identifiable, Codable, Equatable, Sendable {
+    var id = UUID()
+    var role: PlanningMessageRole
+    var content: String
+    var timestamp = Date()
+}
+
+enum RequirementPlanningPhase: String, Codable, Equatable, Sendable {
+    case questioning
+    case compiling
+    case ready
+    case failed
+}
+
+struct RequirementPlanSession: Identifiable, Codable, Equatable, Sendable {
+    var id = UUID()
+    var ticketID: Int
+    var intensity: RequirementPlanningIntensity
+    var provider: AIProvider
+    var modelID: String? = nil
+    var reasoningEffort: String? = nil
+    var repositoryPath: String
+    var branch: String
+    var helperContext: String
+    var messages: [PlanningMessage] = []
+    var phase: RequirementPlanningPhase
+    var askedCount: Int = 0
+    var questionTotal: Int? = nil
+    var developmentDocument: String? = nil
+    var errorMessage: String? = nil
+    var createdAt = Date()
+    var updatedAt = Date()
+
+    /// AI 已提问或计划已就绪，关闭详情后卡片应提示用户进去确认。
+    var awaitsUserConfirmation: Bool {
+        phase == .questioning || phase == .ready
+    }
+
+    mutating func recoverIfInterrupted() {
+        guard phase == .compiling else { return }
+        phase = messages.isEmpty ? .failed : .questioning
+        errorMessage = "上次拆解在退出时中断，请重试。"
+        updatedAt = Date()
     }
 }
 
@@ -67,12 +160,87 @@ struct Ticket: Identifiable, Codable, Hashable {
     var assignee: String
     var sourceURL: URL?
     var author: String? = nil
+    /// 本地测试工单：知识库同步时保留，交付时跳过远程工单更新。
+    var isLocalTest: Bool = false
+
+    private enum CodingKeys: String, CodingKey {
+        case id, projectID, projectName, kind, priority, status, title, description
+        case targetVersion, updatedAt, assignee, sourceURL, author, isLocalTest
+    }
 
     var issueNumber: String { "#\(id)" }
 
     /// 去掉知识库抓取时夹带的「引用 / 描述」等标签噪音
     var displayDescription: String {
         Self.sanitizedDescription(description)
+    }
+
+    init(
+        id: Int,
+        projectID: String,
+        projectName: String,
+        kind: TicketKind,
+        priority: TicketPriority,
+        status: TicketStatus,
+        title: String,
+        description: String,
+        targetVersion: String,
+        updatedAt: Date,
+        assignee: String,
+        sourceURL: URL?,
+        author: String? = nil,
+        isLocalTest: Bool = false
+    ) {
+        self.id = id
+        self.projectID = projectID
+        self.projectName = projectName
+        self.kind = kind
+        self.priority = priority
+        self.status = status
+        self.title = title
+        self.description = description
+        self.targetVersion = targetVersion
+        self.updatedAt = updatedAt
+        self.assignee = assignee
+        self.sourceURL = sourceURL
+        self.author = author
+        self.isLocalTest = isLocalTest
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        projectID = try container.decode(String.self, forKey: .projectID)
+        projectName = try container.decode(String.self, forKey: .projectName)
+        kind = try container.decode(TicketKind.self, forKey: .kind)
+        priority = try container.decode(TicketPriority.self, forKey: .priority)
+        status = try container.decode(TicketStatus.self, forKey: .status)
+        title = try container.decode(String.self, forKey: .title)
+        description = try container.decode(String.self, forKey: .description)
+        targetVersion = try container.decode(String.self, forKey: .targetVersion)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        assignee = try container.decode(String.self, forKey: .assignee)
+        sourceURL = try container.decodeIfPresent(URL.self, forKey: .sourceURL)
+        author = try container.decodeIfPresent(String.self, forKey: .author)
+        isLocalTest = try container.decodeIfPresent(Bool.self, forKey: .isLocalTest) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(projectID, forKey: .projectID)
+        try container.encode(projectName, forKey: .projectName)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(priority, forKey: .priority)
+        try container.encode(status, forKey: .status)
+        try container.encode(title, forKey: .title)
+        try container.encode(description, forKey: .description)
+        try container.encode(targetVersion, forKey: .targetVersion)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(assignee, forKey: .assignee)
+        try container.encodeIfPresent(sourceURL, forKey: .sourceURL)
+        try container.encodeIfPresent(author, forKey: .author)
+        try container.encode(isLocalTest, forKey: .isLocalTest)
     }
 
     static func sanitizedDescription(_ raw: String) -> String {
@@ -102,22 +270,41 @@ struct Ticket: Identifiable, Codable, Hashable {
         author?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
-    /// 规范提交信息：fix/update: #工单号 中文简述
-    func suggestedCommitMessage(summary: String?) -> String {
+    /// 规范提交信息：fix/update: #工单号 问题简述（用工单标题，避免 AI 摘要偏文件改动）
+    func suggestedCommitMessage(summary: String? = nil) -> String {
         let prefix: String
         switch kind {
         case .bug, .support: prefix = "fix"
         case .feature, .task, .suggestion: prefix = "update"
         }
 
-        let raw = (summary?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-            ?? title
-        let firstLine = raw
+        let titleBrief = title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
             .split(separator: "\n", omittingEmptySubsequences: true)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty && !$0.hasPrefix("DEVFLOW_") }
-            ?? title
-        let cleaned = String(firstLine.prefix(72))
+            .first { !$0.isEmpty }
+
+        // 仅当标题不可用时，才回退到 AI 摘要中「像问题描述」的一行（排除明显的文件路径改动句）
+        let summaryBrief: String? = {
+            guard let summary else { return nil }
+            return summary
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .first { line in
+                    guard !line.isEmpty, !line.hasPrefix("DEVFLOW_") else { return false }
+                    if line.contains("`") || line.contains("/") || line.contains(".dart") || line.contains(".swift") {
+                        return false
+                    }
+                    if line.contains("修改了") || line.contains("更新了") || line.contains("在 ") {
+                        return false
+                    }
+                    return true
+                }
+                .map { String($0) }
+        }()
+
+        let brief = titleBrief ?? summaryBrief ?? "完善相关逻辑"
+        let cleaned = String(brief.prefix(72))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return "\(prefix): \(issueNumber) \(cleaned)"
     }
@@ -159,6 +346,20 @@ enum AIProvider: String, Codable, CaseIterable, Identifiable {
             result.append(provider)
         }
         return result
+    }
+}
+
+struct CustomAIProviderConfig: Identifiable, Codable, Equatable, Sendable {
+    var id = UUID()
+    var name: String
+    var apiURL: String
+    var modelIDs: [String] = []
+    var selectedModelID: String = ""
+    var systemPrompt: String = "你是一个可以调用本地工具的开发助手。需要读取或修改项目时，先说明原因。"
+
+    var displayModelID: String {
+        if !selectedModelID.isEmpty { return selectedModelID }
+        return modelIDs.first ?? "未选择模型"
     }
 }
 
@@ -210,6 +411,7 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
     case approval = "等待我确认"
     case completed = "已完成"
     case repositories = "项目与仓库配置"
+    case agent = "AI Agent"
     case settings = "设置"
 
     var id: String { rawValue }
@@ -221,9 +423,17 @@ enum SidebarDestination: String, CaseIterable, Identifiable {
         case .approval: "checkmark.message"
         case .completed: "checkmark.circle"
         case .repositories: "shippingbox"
+        case .agent: "sparkles"
         case .settings: "gearshape"
         }
     }
+}
+
+struct AgentChatMessage: Identifiable, Codable, Equatable, Sendable {
+    var id = UUID()
+    var role: String
+    var content: String
+    var createdAt = Date()
 }
 
 enum SyncStatus: Equatable {
@@ -276,7 +486,7 @@ enum JobStage: String, Codable, CaseIterable {
     case awaitingApproval = "人工确认"
     case committing = "本地 Commit"
     case pulling = "拉取最新代码"
-    case merging = "合并回目标分支"
+    case merging = "squash 合回"
     case pushing = "Push"
     case updatingTicket = "转为待测试"
     case completed = "已完成"
@@ -289,11 +499,30 @@ enum JobStage: String, Codable, CaseIterable {
         self == .awaitingPlanApproval || self == .awaitingApproval
     }
 
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        if let value = JobStage(rawValue: raw) {
+            self = value
+            return
+        }
+        switch raw {
+        case "合并回目标分支":
+            self = .merging
+        default:
+            self = .failed
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 enum AIExecutionPhase: String, Codable, Equatable, Sendable {
     case analysis
     case modification
+    case planning
 }
 
 enum AIExecutionState: String, Codable, Equatable, Sendable {

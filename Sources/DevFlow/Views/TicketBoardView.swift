@@ -13,6 +13,7 @@ struct TicketBoardView: View {
     private let maximumGridColumnCount = 4
 
     @State private var topBarWidth: CGFloat = 1200
+    @State private var showingCreateTestTicket = false
 
     private func gridContentWidth(for availableWidth: CGFloat) -> CGFloat {
         max(0, availableWidth - gridPadding * 2)
@@ -52,6 +53,10 @@ struct TicketBoardView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(DevFlowTheme.canvas(colorScheme))
+        .sheet(isPresented: $showingCreateTestTicket) {
+            CreateLocalTestTicketSheet()
+                .environmentObject(appState)
+        }
     }
 
     private var cardContent: some View {
@@ -131,6 +136,23 @@ struct TicketBoardView: View {
             .layoutPriority(0)
 
             HStack(spacing: 10) {
+                if appState.isTestModeEnabled {
+                    Button {
+                        showingCreateTestTicket = true
+                    } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: "plus.circle.fill")
+                                .frame(width: 14, height: 14)
+                            if !isNarrow {
+                                Text("新建测试工单")
+                            }
+                        }
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .fixedSize(horizontal: true, vertical: false)
+                    .help("新建本地测试工单")
+                }
+
                 syncIndicator(compact: isCompact)
 
                 Button {
@@ -341,17 +363,133 @@ struct TicketBoardView: View {
             Image(systemName: appState.filters.isEmpty ? "checkmark.circle" : "line.3.horizontal.decrease.circle")
                 .font(.system(size: 44, weight: .light))
                 .foregroundStyle(DevFlowTheme.accent)
-            Text(appState.filters.isEmpty ? "当前没有待处理工单" : "没有符合筛选条件的工单")
+            Text(
+                appState.destination == .completed && appState.filters.isEmpty
+                    ? "还没有已完成的交付"
+                    : (appState.filters.isEmpty ? "当前没有待处理工单" : "没有符合筛选条件的工单")
+            )
                 .font(.system(size: 17, weight: .semibold))
-            Text(appState.filters.isEmpty ? "刷新知识库或切换其他项目查看" : "调整筛选条件后再试一次")
+            Text(
+                appState.destination == .completed && appState.filters.isEmpty
+                    ? "完成一次交付后，记录会出现在这里"
+                    : (
+                        appState.isTestModeEnabled && appState.filters.isEmpty
+                            ? "可新建测试工单走完整 AI 流程，或刷新知识库同步真实工单"
+                            : (appState.filters.isEmpty ? "刷新知识库或切换其他项目查看" : "调整筛选条件后再试一次")
+                    )
+            )
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
-            if !appState.filters.isEmpty {
+            if appState.isTestModeEnabled && appState.filters.isEmpty {
+                Button("新建测试工单") { showingCreateTestTicket = true }
+                    .buttonStyle(PrimaryButtonStyle())
+            } else if !appState.filters.isEmpty {
                 Button("清除筛选") { appState.filters = TicketFilters() }
                     .buttonStyle(PrimaryButtonStyle())
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct CreateLocalTestTicketSheet: View {
+    @EnvironmentObject private var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var description = ""
+    @State private var kind: TicketKind = .bug
+    @State private var priority: TicketPriority = .normal
+
+    private var canCreate: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var kindHint: String {
+        switch kind.executionMode {
+        case .requirementPlanning:
+            return "将走需求拆解并生成开发计划，不在 App 内编码，也不更新知识库。"
+        case .externalAgent:
+            return "将直接打开外部客户端处理，不更新知识库。"
+        case .inAppPipeline:
+            return "将走完整分析 / 改码 / 提交流程，不更新知识库。"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("新建测试工单")
+                        .font(.system(size: 17, weight: .semibold))
+                    Text(kindHint)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("关闭") { dismiss() }
+                    .buttonStyle(SecondaryButtonStyle())
+            }
+
+            LabeledContent("类型") {
+                Picker("类型", selection: $kind) {
+                    ForEach(TicketKind.allCases) { item in
+                        Text(item.rawValue).tag(item)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("标题")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                TextField("例如：列表页空数据崩溃", text: $title)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("描述")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                TextEditor(text: $description)
+                    .font(.system(size: 13))
+                    .frame(minHeight: 120)
+                    .padding(8)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.primary.opacity(0.08)))
+            }
+
+            LabeledContent("优先级") {
+                Picker("优先级", selection: $priority) {
+                    ForEach(TicketPriority.allCases) { item in
+                        Text(item.rawValue).tag(item)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 240)
+            }
+
+            HStack {
+                Spacer()
+                Button("创建并打开") {
+                    if let ticket = appState.createLocalTestTicket(
+                        title: title,
+                        description: description,
+                        priority: priority,
+                        kind: kind
+                    ) {
+                        dismiss()
+                        appState.open(ticket: ticket, focusSolve: true)
+                    }
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(!canCreate)
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
     }
 }
 

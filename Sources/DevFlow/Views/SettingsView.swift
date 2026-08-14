@@ -7,6 +7,8 @@ struct SettingsView: View {
     @State private var draftAutoSyncIntervalHours = 2
     @State private var toolAvailability: [AIProvider: Bool] = [:]
     @State private var draggingProvider: AIProvider?
+    @State private var editingCustomProvider: CustomAIProviderConfig?
+    @State private var showingNewCustomProvider = false
 
     private var hasUnsavedAutoSyncInterval: Bool {
         draftAutoSyncIntervalHours != appState.clampedAutoSyncIntervalHours
@@ -86,9 +88,18 @@ struct SettingsView: View {
                 }
 
                 settingsSection("AI 工具") {
-                    Text("已安装的工具可拖动排序，工单详情中的 AI 工具会使用同一顺序。")
+                    HStack {
+                        Text("已安装的工具可拖动排序，工单详情中的 AI 工具会使用同一顺序。")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
+                        Spacer()
+                        Button {
+                            showingNewCustomProvider = true
+                        } label: {
+                            Label("新增自定义", systemImage: "plus")
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                    }
 
                     ForEach(Array(appState.orderedAIProviders.enumerated()), id: \.element) { index, provider in
                         if index > 0 {
@@ -96,6 +107,30 @@ struct SettingsView: View {
                         }
                         toolRow(provider)
                     }
+
+                    ForEach(appState.customAIProviders) { provider in
+                        Divider()
+                        customProviderRow(provider)
+                    }
+                }
+
+                settingsSection("测试模式") {
+                    Toggle(isOn: Binding(
+                        get: { appState.isTestModeEnabled },
+                        set: {
+                            appState.isTestModeEnabled = $0
+                            appState.persistState()
+                        }
+                    )) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("启用测试模式")
+                                .font(.system(size: 13, weight: .medium))
+                            Text("可新建本地测试工单并选择类型（Bug / 需求等）；跳过知识库更新，同步时保留假工单。")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
                 }
             }
             .padding(28)
@@ -115,6 +150,24 @@ struct SettingsView: View {
                 availability[provider] = await ProcessRunner.commandExists(provider.command)
             }
             toolAvailability = availability
+        }
+        .sheet(isPresented: $showingNewCustomProvider) {
+            CustomAIProviderEditor(provider: nil) { config, key in
+                appState.customAIProviders.append(config)
+                AgentCredentialStore.saveAPIKey(key, for: config.id)
+                appState.persistState()
+            }
+            .frame(width: 580, height: 500)
+        }
+        .sheet(item: $editingCustomProvider) { provider in
+            CustomAIProviderEditor(provider: provider) { config, key in
+                if let index = appState.customAIProviders.firstIndex(where: { $0.id == config.id }) {
+                    appState.customAIProviders[index] = config
+                }
+                AgentCredentialStore.saveAPIKey(key, for: config.id)
+                appState.persistState()
+            }
+            .frame(width: 580, height: 500)
         }
     }
 
@@ -176,6 +229,134 @@ struct SettingsView: View {
         } else {
             row
         }
+    }
+
+    private func customProviderRow(_ provider: CustomAIProviderConfig) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8).fill(DevFlowTheme.accent.opacity(0.1))
+                Image(systemName: "link").foregroundStyle(DevFlowTheme.accent)
+            }
+            .frame(width: 34, height: 34)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(provider.name).font(.system(size: 14, weight: .semibold))
+                Text(provider.displayModelID)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("编辑") { editingCustomProvider = provider }
+                .buttonStyle(SecondaryButtonStyle())
+            Button {
+                appState.customAIProviders.removeAll { $0.id == provider.id }
+                AgentCredentialStore.saveAPIKey("", for: provider.id)
+                appState.persistState()
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(DevFlowTheme.danger)
+            .help("删除自定义配置")
+        }
+    }
+}
+
+private struct CustomAIProviderEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    let provider: CustomAIProviderConfig?
+    let onSave: (CustomAIProviderConfig, String) -> Void
+    @State private var name = ""
+    @State private var apiURL = ""
+    @State private var apiKey = ""
+    @State private var modelID = ""
+    @State private var modelIDs: [String] = []
+    @State private var systemPrompt = "你是一个可以调用本地工具的开发助手。需要读取或修改项目时，先说明原因。"
+    @State private var isLoadingModels = false
+    @State private var errorMessage = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(provider == nil ? "新增自定义 AI 工具" : "编辑自定义 AI 工具")
+                .font(.system(size: 20, weight: .bold))
+            TextField("名称，例如公司模型", text: $name)
+                .textFieldStyle(.roundedBorder)
+            TextField("API URL，例如 https://api.example.com/v1", text: $apiURL)
+                .textFieldStyle(.roundedBorder)
+            SecureField("API Key", text: $apiKey)
+                .textFieldStyle(.roundedBorder)
+            HStack(spacing: 8) {
+                Picker("模型", selection: $modelID) {
+                    if modelIDs.isEmpty { Text("请先获取模型或手动输入").tag("") }
+                    ForEach(modelIDs, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+                TextField("手动输入模型 ID", text: $modelID)
+                    .textFieldStyle(.roundedBorder)
+                Button {
+                    fetchModels()
+                } label: {
+                    if isLoadingModels { ProgressView().controlSize(.small) } else { Label("从 URL 获取", systemImage: "arrow.down.circle") }
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(isLoadingModels || apiURL.isEmpty || apiKey.isEmpty)
+            }
+            TextField("系统提示词（可选）", text: $systemPrompt, axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(2...4)
+            if !errorMessage.isEmpty {
+                Text(errorMessage).font(.system(size: 12)).foregroundStyle(DevFlowTheme.danger)
+            }
+            Spacer()
+            HStack {
+                Spacer()
+                Button("取消") { dismiss() }.buttonStyle(SecondaryButtonStyle())
+                Button("保存") { save() }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || apiURL.isEmpty || modelID.isEmpty)
+            }
+        }
+        .padding(28)
+        .onAppear {
+            guard let provider else { return }
+            name = provider.name
+            apiURL = provider.apiURL
+            modelIDs = provider.modelIDs
+            modelID = provider.selectedModelID
+            systemPrompt = provider.systemPrompt
+            apiKey = AgentCredentialStore.loadAPIKey(for: provider.id)
+        }
+    }
+
+    private func fetchModels() {
+        isLoadingModels = true
+        errorMessage = ""
+        Task {
+            do {
+                let fetched = try await CustomAIProviderService.fetchModels(apiURL: apiURL, apiKey: apiKey)
+                await MainActor.run {
+                    modelIDs = fetched
+                    if !fetched.contains(modelID) { modelID = fetched.first ?? "" }
+                    isLoadingModels = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription + "；也可以手动输入模型 ID。"
+                    isLoadingModels = false
+                }
+            }
+        }
+    }
+
+    private func save() {
+        var config = provider ?? CustomAIProviderConfig(name: name, apiURL: apiURL)
+        config.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        config.apiURL = apiURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        config.modelIDs = modelIDs.contains(modelID) ? modelIDs : modelIDs + [modelID]
+        config.selectedModelID = modelID
+        config.systemPrompt = systemPrompt
+        onSave(config, apiKey)
+        dismiss()
     }
 }
 

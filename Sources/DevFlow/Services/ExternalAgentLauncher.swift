@@ -8,6 +8,7 @@ enum ExternalAgentLauncher {
         var branch: String
         var helperContext: String
         var provider: AIProvider
+        var developmentDocument: String? = nil
     }
 
     enum LaunchError: LocalizedError {
@@ -53,10 +54,16 @@ enum ExternalAgentLauncher {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let fileURL = directory.appendingPathComponent("current-task.md")
+        let content = taskFileMarkdown(for: context)
+        try content.write(to: fileURL, atomically: true, encoding: .utf8)
+        return fileURL
+    }
+
+    static func taskFileMarkdown(for context: TaskContext) -> String {
         let helper = context.helperContext.trimmingCharacters(in: .whitespacesAndNewlines)
         let source = context.ticket.sourceURL?.absoluteString ?? "无"
-        let content = """
-        # DevFlow 需求任务
+        let header = """
+        # DevFlow \(context.ticket.kind.rawValue)任务
 
         - 工单编号：\(context.ticket.issueNumber)
         - 类型：\(context.ticket.kind.rawValue)
@@ -65,6 +72,23 @@ enum ExternalAgentLauncher {
         - 仓库：\(context.repositoryPath)
         - 分支：\(context.branch)
         - 原工单：\(source)
+        """
+
+        if let document = context.developmentDocument?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !document.isEmpty {
+            return """
+            \(header)
+
+            ## 协作说明
+
+            工作台已完成需求拆解。请按下方开发计划直接实施，不要重新澄清需求；计划已写到可动手的粒度，按步骤改对应文件，非关键细节以「假设」为准，不要扩大「明确不做」中的范围。
+
+            \(document)
+            """
+        }
+
+        return """
+        \(header)
 
         ## 描述
 
@@ -80,12 +104,20 @@ enum ExternalAgentLauncher {
         若描述中包含 Wiki / 文档链接，请先尝试打开并提炼要点。
         保持改动聚焦，完成一阶段后先与用户确认再继续。
         """
-        try content.write(to: fileURL, atomically: true, encoding: .utf8)
-        return fileURL
     }
 
     private static func launchPrompt(taskFileURL: URL, context: TaskContext) -> String {
         let relativePath = ".devflow/current-task.md"
+        if let document = context.developmentDocument, !document.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return """
+            请先阅读任务说明文件：\(relativePath)（绝对路径：\(taskFileURL.path)）
+            当前仓库：\(context.repositoryPath)
+            当前分支：\(context.branch)
+            工单：\(context.ticket.issueNumber) \(context.ticket.title)
+            工作台已完成需求拆解并写好开发计划。请按该文档的分步实现实施，不要重新澄清需求，也不要扩大「明确不做」的范围。
+            """
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         return """
         请先阅读任务说明文件：\(relativePath)（绝对路径：\(taskFileURL.path)）
         当前仓库：\(context.repositoryPath)

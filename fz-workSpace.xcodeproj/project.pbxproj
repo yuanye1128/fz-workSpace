@@ -7,24 +7,28 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		01B5343D0BBBF5E27C2D4067 /* RequirementPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA107082C023645613A1E4ED /* RequirementPlanner.swift */; };
 		051F8ACA27B67C9CD41B300C /* DevFlowApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFA1B28058BEC2F8CB6AC366 /* DevFlowApp.swift */; };
 		08B34EEEE26ABF2A405AE479 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 850CF8C2B758925F611A0C2C /* SidebarView.swift */; };
+		12BA030516F67E8CAA31E892 /* AIModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 548EBEEC840CC3C5867971E6 /* AIModelCatalog.swift */; };
 		1A9EE838BDFF7E77E2D3DED6 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B6B59C8BC7CD64433CBD38A /* Theme.swift */; };
 		23AD576EDB8F77012E2C39EF /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54E5B362D4E58A30EB7ACC6E /* RootView.swift */; };
 		37EB51FED3B25B460B9F5078 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B168BD4F14D8CA25B5D4379E /* SettingsView.swift */; };
-		3E4D64A61D8763C248B06241 /* DurableExecution.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75B6ED4D742436D0DB39A518 /* DurableExecution.swift */; };
+		4FE87E84309AFCEA437A115F /* RequirementPlanningView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F34DB29CB82C4E9FE2C337C /* RequirementPlanningView.swift */; };
 		56C3D3137C7FD0BC38211B49 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C417DF30A9A9E7D2B924568B /* AppState.swift */; };
+		5A50EB13D7129AC0AB9D93F4 /* DurableExecution.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8394AFC49490203E02E3D67D /* DurableExecution.swift */; };
 		5A55833C2E8267AEB500E5D2 /* TicketCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585A8EE717817A61D5E7ED81 /* TicketCardView.swift */; };
 		5B98F78A2803AAFB7BEEF0A5 /* RepositoryConfigView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93DD63190C31D4F713D16167 /* RepositoryConfigView.swift */; };
 		7EC6F506F30759DF770FEEB6 /* PersistenceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CC4D79BD2BB9E401954883D /* PersistenceStore.swift */; };
 		837B0023A9304B9F1648D4A8 /* TicketBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E9103E78E2CCCFBF5AA158F /* TicketBoardView.swift */; };
 		877EB37E30704DA908E3133E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E7F20C4627192619E92E7E3F /* Assets.xcassets */; };
 		938CE34B44AD43ACB2B68533 /* AIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62E09025CAEDAFCFD4B8CF17 /* AIService.swift */; };
-		A1B2C3D4E5F60718293A4B5C /* AIModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F5061728394A5B6C /* AIModelCatalog.swift */; };
-		C2D3E4F5061728394A5B6C7D /* ExternalAgentLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3E4F5061728394A5B6C7D8E /* ExternalAgentLauncher.swift */; };
+		A6E8C1F11A1B4A6A9D010001 /* AgentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6E8C1F11A1B4A6A9D020001 /* AgentService.swift */; };
+		A6E8C1F11A1B4A6A9D010002 /* AgentChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6E8C1F11A1B4A6A9D020002 /* AgentChatView.swift */; };
 		ACCA9EECD0E618E350BF91CE /* TicketDetailModal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 160A8516E70DD18EC18BE5B3 /* TicketDetailModal.swift */; };
 		B960305D1FC39DD5067D3542 /* GitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 236459CD27774F81CD0F1B70 /* GitService.swift */; };
 		BCC3E5FEEC7BA657051822A9 /* JobCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46A71C56A1967CB47D52A9F7 /* JobCoordinator.swift */; };
+		C6CCBC6BBC1C53B99C8F5B29 /* ExternalAgentLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D3143C886460B4686D0E0A4 /* ExternalAgentLauncher.swift */; };
 		CAFE767375BE554F4EF345CB /* AIReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A5DBE56C0DA54A68200B3B5 /* AIReportView.swift */; };
 		CB55E94BE025D0AB9932FA11 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 455A65685AA42ADD72894F32 /* Components.swift */; };
 		FB31103CC57A046E52787E64 /* KnowledgeBaseSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 388FD5D91F9BED680601D214 /* KnowledgeBaseSession.swift */; };
@@ -34,6 +38,7 @@
 
 /* Begin PBXFileReference section */
 		0A5DBE56C0DA54A68200B3B5 /* AIReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIReportView.swift; sourceTree = "<group>"; };
+		0D3143C886460B4686D0E0A4 /* ExternalAgentLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalAgentLauncher.swift; sourceTree = "<group>"; };
 		0D65E25B6687F5836C6249AC /* ProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunner.swift; sourceTree = "<group>"; };
 		160A8516E70DD18EC18BE5B3 /* TicketDetailModal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TicketDetailModal.swift; sourceTree = "<group>"; };
 		1CC4D79BD2BB9E401954883D /* PersistenceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceStore.swift; sourceTree = "<group>"; };
@@ -45,17 +50,20 @@
 		455A65685AA42ADD72894F32 /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		466FDC7416DFBE7FEE8D406D /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		46A71C56A1967CB47D52A9F7 /* JobCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobCoordinator.swift; sourceTree = "<group>"; };
+		548EBEEC840CC3C5867971E6 /* AIModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModelCatalog.swift; sourceTree = "<group>"; };
 		54E5B362D4E58A30EB7ACC6E /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		585A8EE717817A61D5E7ED81 /* TicketCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TicketCardView.swift; sourceTree = "<group>"; };
+		5F34DB29CB82C4E9FE2C337C /* RequirementPlanningView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequirementPlanningView.swift; sourceTree = "<group>"; };
 		62E09025CAEDAFCFD4B8CF17 /* AIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIService.swift; sourceTree = "<group>"; };
-		B1C2D3E4F5061728394A5B6C /* AIModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModelCatalog.swift; sourceTree = "<group>"; };
-		D3E4F5061728394A5B6C7D8E /* ExternalAgentLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalAgentLauncher.swift; sourceTree = "<group>"; };
-		75B6ED4D742436D0DB39A518 /* DurableExecution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DurableExecution.swift; sourceTree = "<group>"; };
+		A6E8C1F11A1B4A6A9D020001 /* AgentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentService.swift; sourceTree = "<group>"; };
+		A6E8C1F11A1B4A6A9D020002 /* AgentChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentChatView.swift; sourceTree = "<group>"; };
+		8394AFC49490203E02E3D67D /* DurableExecution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DurableExecution.swift; sourceTree = "<group>"; };
 		850CF8C2B758925F611A0C2C /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		8E461DEF914920E56A5734EA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		93DD63190C31D4F713D16167 /* RepositoryConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepositoryConfigView.swift; sourceTree = "<group>"; };
 		B168BD4F14D8CA25B5D4379E /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		C417DF30A9A9E7D2B924568B /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		DA107082C023645613A1E4ED /* RequirementPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequirementPlanner.swift; sourceTree = "<group>"; };
 		E7F20C4627192619E92E7E3F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		EFA1B28058BEC2F8CB6AC366 /* DevFlowApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevFlowApp.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -80,15 +88,17 @@
 		487A492C752FA0890A4A858F /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				A6E8C1F11A1B4A6A9D020001 /* AgentService.swift */,
+				548EBEEC840CC3C5867971E6 /* AIModelCatalog.swift */,
 				62E09025CAEDAFCFD4B8CF17 /* AIService.swift */,
-				B1C2D3E4F5061728394A5B6C /* AIModelCatalog.swift */,
-				75B6ED4D742436D0DB39A518 /* DurableExecution.swift */,
-				D3E4F5061728394A5B6C7D8E /* ExternalAgentLauncher.swift */,
+				8394AFC49490203E02E3D67D /* DurableExecution.swift */,
+				0D3143C886460B4686D0E0A4 /* ExternalAgentLauncher.swift */,
 				236459CD27774F81CD0F1B70 /* GitService.swift */,
 				46A71C56A1967CB47D52A9F7 /* JobCoordinator.swift */,
 				388FD5D91F9BED680601D214 /* KnowledgeBaseSession.swift */,
 				1CC4D79BD2BB9E401954883D /* PersistenceStore.swift */,
 				0D65E25B6687F5836C6249AC /* ProcessRunner.swift */,
+				DA107082C023645613A1E4ED /* RequirementPlanner.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -119,9 +129,11 @@
 		C2E912EA2F1AFE0558933265 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				A6E8C1F11A1B4A6A9D020002 /* AgentChatView.swift */,
 				0A5DBE56C0DA54A68200B3B5 /* AIReportView.swift */,
 				455A65685AA42ADD72894F32 /* Components.swift */,
 				93DD63190C31D4F713D16167 /* RepositoryConfigView.swift */,
+				5F34DB29CB82C4E9FE2C337C /* RequirementPlanningView.swift */,
 				54E5B362D4E58A30EB7ACC6E /* RootView.swift */,
 				B168BD4F14D8CA25B5D4379E /* SettingsView.swift */,
 				850CF8C2B758925F611A0C2C /* SidebarView.swift */,
@@ -210,14 +222,16 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A6E8C1F11A1B4A6A9D010001 /* AgentService.swift in Sources */,
+				A6E8C1F11A1B4A6A9D010002 /* AgentChatView.swift in Sources */,
+				12BA030516F67E8CAA31E892 /* AIModelCatalog.swift in Sources */,
 				CAFE767375BE554F4EF345CB /* AIReportView.swift in Sources */,
-				A1B2C3D4E5F60718293A4B5C /* AIModelCatalog.swift in Sources */,
 				938CE34B44AD43ACB2B68533 /* AIService.swift in Sources */,
-				C2D3E4F5061728394A5B6C7D /* ExternalAgentLauncher.swift in Sources */,
 				56C3D3137C7FD0BC38211B49 /* AppState.swift in Sources */,
 				CB55E94BE025D0AB9932FA11 /* Components.swift in Sources */,
 				051F8ACA27B67C9CD41B300C /* DevFlowApp.swift in Sources */,
-				3E4D64A61D8763C248B06241 /* DurableExecution.swift in Sources */,
+				5A50EB13D7129AC0AB9D93F4 /* DurableExecution.swift in Sources */,
+				C6CCBC6BBC1C53B99C8F5B29 /* ExternalAgentLauncher.swift in Sources */,
 				B960305D1FC39DD5067D3542 /* GitService.swift in Sources */,
 				BCC3E5FEEC7BA657051822A9 /* JobCoordinator.swift in Sources */,
 				FB31103CC57A046E52787E64 /* KnowledgeBaseSession.swift in Sources */,
@@ -225,6 +239,8 @@
 				7EC6F506F30759DF770FEEB6 /* PersistenceStore.swift in Sources */,
 				FB621DD9B1ABA18A88160EEE /* ProcessRunner.swift in Sources */,
 				5B98F78A2803AAFB7BEEF0A5 /* RepositoryConfigView.swift in Sources */,
+				01B5343D0BBBF5E27C2D4067 /* RequirementPlanner.swift in Sources */,
+				4FE87E84309AFCEA437A115F /* RequirementPlanningView.swift in Sources */,
 				23AD576EDB8F77012E2C39EF /* RootView.swift in Sources */,
 				37EB51FED3B25B460B9F5078 /* SettingsView.swift in Sources */,
 				08B34EEEE26ABF2A405AE479 /* SidebarView.swift in Sources */,

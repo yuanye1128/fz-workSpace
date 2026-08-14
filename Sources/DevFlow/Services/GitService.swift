@@ -130,13 +130,14 @@ final class GitService: @unchecked Sendable {
         _ = try await git(args, at: repositoryPath, allowFailure: true)
     }
 
-    func mergeBranch(
+    /// 将 sourceBranch 的改动 squash 进当前检出，并生成单条 commit（线性历史，无 Merge 节点）。
+    func squashMergeBranch(
         _ sourceBranch: String,
         intoCheckoutAt path: String,
         message: String
     ) async throws -> MergeResult {
         let result = try await git(
-            ["merge", "--no-ff", "-m", message, sourceBranch],
+            ["merge", "--squash", sourceBranch],
             at: path,
             allowFailure: true
         )
@@ -157,6 +158,21 @@ final class GitService: @unchecked Sendable {
                 mergedCommitHash: nil
             )
         }
+
+        let status = try await git(["status", "--porcelain"], at: path, allowFailure: true)
+        let dirty = !status.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if dirty {
+            let commit = try await git(["commit", "-m", message], at: path, allowFailure: true)
+            if commit.exitCode != 0 {
+                return MergeResult(
+                    success: false,
+                    conflicts: [],
+                    output: commit.standardOutput + commit.standardError,
+                    mergedCommitHash: nil
+                )
+            }
+        }
+
         let hash = try await git(["rev-parse", "HEAD"], at: path)
         return MergeResult(
             success: true,

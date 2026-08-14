@@ -25,6 +25,7 @@ final class JobCoordinator {
         helperContext: String
     ) async {
         guard appState.activeWorkItem(for: ticket.id) == nil else { return }
+        guard !ticket.kind.usesRequirementPlanning else { return }
 
         let itemID = UUID()
         let taskBranch = "devflow/\(ticket.id)-\(String(itemID.uuidString.prefix(8)).lowercased())"
@@ -447,24 +448,24 @@ final class JobCoordinator {
             append(pull.hadRemoteBranch ? "已同步远程 \(currentItem.branch) 最新代码" : pull.output, to: itemID)
 
             setStage(.merging, for: itemID)
-            append("正在将 \(taskBranch) merge 合回 \(currentItem.branch)", to: itemID)
-            let merge = try await gitService.mergeBranch(
+            append("正在将 \(taskBranch) squash 合回 \(currentItem.branch)", to: itemID)
+            let merge = try await gitService.squashMergeBranch(
                 taskBranch,
                 intoCheckoutAt: mergePath,
-                message: "Merge \(taskBranch) into \(currentItem.branch)"
+                message: commitMessage
             )
             if !merge.success {
                 if merge.conflicts.isEmpty {
                     throw JobError.needsManualGit(
-                        "自动 merge 未能确定结果，请在合并工作区自行处理：\(mergePath)\n\(merge.output)"
+                        "自动 squash 合回未能确定结果，请在合并工作区自行处理：\(mergePath)\n\(merge.output)"
                     )
                 }
                 let files = merge.conflicts.joined(separator: "、")
                 throw JobError.needsManualGit(
-                    "merge 冲突，请在合并工作区自行解决后推送：\(mergePath)\n冲突文件：\(files)"
+                    "squash 合回冲突，请在合并工作区自行解决后推送：\(mergePath)\n冲突文件：\(files)"
                 )
             }
-            append("merge 成功：\(String((merge.mergedCommitHash ?? "").prefix(8)))", to: itemID)
+            append("squash 合回成功：\(String((merge.mergedCommitHash ?? "").prefix(8)))", to: itemID)
 
             setStage(.pushing, for: itemID)
             append("正在 push \(currentItem.branch) 到 \(remote)", to: itemID)
@@ -494,7 +495,7 @@ final class JobCoordinator {
 
         setStage(.updatingTicket, for: itemID)
         if ticket.sourceURL == nil {
-            append("当前为示例工单，未绑定知识库地址，跳过远程工单更新", to: itemID)
+                append("当前为本地测试工单，跳过远程工单更新", to: itemID)
         } else {
             do {
                 try await appState.knowledgeBaseSession.updateTicket(
@@ -550,7 +551,7 @@ final class JobCoordinator {
 
         setStage(.updatingTicket, for: itemID)
         if ticket.sourceURL == nil {
-            append("当前为示例工单，未绑定知识库地址，跳过远程工单更新", to: itemID)
+                append("当前为本地测试工单，跳过远程工单更新", to: itemID)
         } else {
             do {
                 try await appState.knowledgeBaseSession.updateTicket(

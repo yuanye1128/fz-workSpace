@@ -4,40 +4,62 @@ struct AppSnapshot: Codable {
     var tickets: [Ticket]
     var repositories: [RepositoryConfig]
     var workItems: [WorkItem]
+    var planningSessions: [RequirementPlanSession]
     var knowledgeBaseURL: String
     var defaultTestAssignee: String
     var syncIntervalHours: Int
     var hasAuthenticatedSession: Bool
     var lastSyncedAt: Date?
     var aiProviderOrder: [AIProvider]
+    var isTestModeEnabled: Bool
+    var agentAPIURL: String
+    var agentAPIKey: String
+    var agentModelID: String
+    var agentSystemPrompt: String
+    var customAIProviders: [CustomAIProviderConfig]
 
     init(
         tickets: [Ticket],
         repositories: [RepositoryConfig],
         workItems: [WorkItem],
+        planningSessions: [RequirementPlanSession] = [],
         knowledgeBaseURL: String,
         defaultTestAssignee: String,
         syncIntervalHours: Int,
         hasAuthenticatedSession: Bool,
         lastSyncedAt: Date? = nil,
-        aiProviderOrder: [AIProvider] = Array(AIProvider.allCases)
+        aiProviderOrder: [AIProvider] = Array(AIProvider.allCases),
+        isTestModeEnabled: Bool = false,
+        agentAPIURL: String = "",
+        agentAPIKey: String = "",
+        agentModelID: String = "",
+        agentSystemPrompt: String = "你是一个可以调用本地工具的开发助手。需要读取或修改项目时，先说明原因。",
+        customAIProviders: [CustomAIProviderConfig] = []
     ) {
         self.tickets = tickets
         self.repositories = repositories
         self.workItems = workItems
+        self.planningSessions = planningSessions
         self.knowledgeBaseURL = knowledgeBaseURL
         self.defaultTestAssignee = defaultTestAssignee
         self.syncIntervalHours = syncIntervalHours
         self.hasAuthenticatedSession = hasAuthenticatedSession
         self.lastSyncedAt = lastSyncedAt
         self.aiProviderOrder = AIProvider.normalizedOrder(aiProviderOrder)
+        self.isTestModeEnabled = isTestModeEnabled
+        self.agentAPIURL = agentAPIURL
+        self.agentAPIKey = agentAPIKey
+        self.agentModelID = agentModelID
+        self.agentSystemPrompt = agentSystemPrompt
+        self.customAIProviders = customAIProviders
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         tickets = try container.decode([Ticket].self, forKey: .tickets)
         repositories = try container.decode([RepositoryConfig].self, forKey: .repositories)
-        workItems = try container.decode([WorkItem].self, forKey: .workItems)
+        workItems = (try? container.decode([WorkItem].self, forKey: .workItems)) ?? []
+        planningSessions = (try? container.decode([RequirementPlanSession].self, forKey: .planningSessions)) ?? []
         knowledgeBaseURL = try container.decode(String.self, forKey: .knowledgeBaseURL)
         defaultTestAssignee = try container.decode(String.self, forKey: .defaultTestAssignee)
         syncIntervalHours = try container.decodeIfPresent(Int.self, forKey: .syncIntervalHours) ?? 2
@@ -48,6 +70,13 @@ struct AppSnapshot: Codable {
         let storedOrder = (try container.decodeIfPresent([String].self, forKey: .aiProviderOrder) ?? [])
             .compactMap(AIProvider.init(rawValue:))
         aiProviderOrder = AIProvider.normalizedOrder(storedOrder)
+        isTestModeEnabled = try container.decodeIfPresent(Bool.self, forKey: .isTestModeEnabled) ?? false
+        agentAPIURL = try container.decodeIfPresent(String.self, forKey: .agentAPIURL) ?? ""
+        agentAPIKey = try container.decodeIfPresent(String.self, forKey: .agentAPIKey) ?? ""
+        agentModelID = try container.decodeIfPresent(String.self, forKey: .agentModelID) ?? ""
+        agentSystemPrompt = try container.decodeIfPresent(String.self, forKey: .agentSystemPrompt)
+            ?? "你是一个可以调用本地工具的开发助手。需要读取或修改项目时，先说明原因。"
+        customAIProviders = (try? container.decode([CustomAIProviderConfig].self, forKey: .customAIProviders)) ?? []
     }
 }
 

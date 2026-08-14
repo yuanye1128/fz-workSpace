@@ -14,16 +14,28 @@ enum AIExecutionMode: Sendable {
     case analysis
     case analysisRevision(previousPlan: String, userNote: String)
     case modification(confirmedPlan: String)
+    case requirementPlanning(intensity: RequirementPlanningIntensity, askedCount: Int, questionTotal: Int?, messages: [PlanningMessage], finishNow: Bool)
 
     var isAnalysis: Bool {
         switch self {
-        case .analysis, .analysisRevision: true
+        case .analysis, .analysisRevision, .requirementPlanning: true
         case .modification: false
         }
     }
 
+    var usesCursorPlanMode: Bool {
+        switch self {
+        case .analysis, .analysisRevision: true
+        case .modification, .requirementPlanning: false
+        }
+    }
+
     var phase: AIExecutionPhase {
-        isAnalysis ? .analysis : .modification
+        switch self {
+        case .analysis, .analysisRevision: .analysis
+        case .modification: .modification
+        case .requirementPlanning: .planning
+        }
     }
 }
 
@@ -39,6 +51,8 @@ enum AIExecutionError: LocalizedError {
             "分析未输出完整方案：Cursor 结束时没有 DEVFLOW 段落，也没有 createPlan 方案。请重试。"
         case .incompleteProtocolOutput(.modification):
             "编码未输出完整结果（缺少 DEVFLOW_SUMMARY / DEVFLOW_REASONING / DEVFLOW_TESTS / DEVFLOW_RISKS），不能进入交付确认。请重试。"
+        case .incompleteProtocolOutput(.planning):
+            "需求拆解未输出下一个问题或完整开发文档。请重试。"
         }
     }
 }
@@ -74,6 +88,16 @@ final class AIService: @unchecked Sendable {
             )
         case let .modification(confirmedPlan):
             prompt = PromptBuilder.build(ticket: ticket, helperContext: helperContext, confirmedPlan: confirmedPlan)
+        case let .requirementPlanning(intensity, askedCount, questionTotal, messages, finishNow):
+            prompt = PromptBuilder.buildRequirementPlanning(
+                ticket: ticket,
+                helperContext: helperContext,
+                intensity: intensity,
+                askedCount: askedCount,
+                questionTotal: questionTotal,
+                messages: messages,
+                finishNow: finishNow
+            )
         }
         let command: String
         let arguments: [String]
@@ -105,7 +129,7 @@ final class AIService: @unchecked Sendable {
                 "--approve-mcps",
                 "--output-format", "stream-json"
             ]
-            if mode.isAnalysis {
+            if mode.usesCursorPlanMode {
                 args += ["--mode", "plan"]
             }
             if let modelID, !modelID.isEmpty {
@@ -441,6 +465,11 @@ final class AIService: @unchecked Sendable {
     }
 }
 
+enum RequirementPlanningTurn: Equatable {
+    case question(text: String, index: Int, total: Int?)
+    case document(String)
+}
+
 enum PromptBuilder {
     static func buildAnalysis(ticket: Ticket, helperContext: String) -> String {
         """
@@ -579,6 +608,153 @@ enum PromptBuilder {
         """
     }
 
+    static func buildRequirementPlanning(
+        ticket: Ticket,
+        helperContext: String,
+        intensity: RequirementPlanningIntensity,
+        askedCount: Int,
+        questionTotal: Int?,
+        messages: [PlanningMessage],
+        finishNow: Bool
+    ) -> String {
+        let range = intensity.questionRange
+        let suggestedDepth = range.lowerBound == range.upperBound
+            ? "大约 \(range.lowerBound) 题"
+            : "大约 \(range.lowerBound)–\(range.upperBound) 题"
+        let estimateHint = questionTotal.map { "你之前估计大约 \($0) 题，这只是参考，仍可按理解增减。" } ?? ""
+        let finishRule = finishNow
+            ? "用户要求立即结束提问。现在必须输出完整开发文档，不要再提问。"
+            : "题数不固定：完全取决于你对需求的理解。关键决策已清楚就输出文档；仍有会改变方案方向的不清楚点，必须继续问，不要因为建议题数而收束。建议深度\(suggestedDepth)，可少可多。"
+        let transcript = formatPlanningTranscript(messages)
+
+        return """
+        你正在通过 DevFlow 工作台澄清「需求」工单。当前是只读分析阶段，绝对不要修改、创建或删除任何文件，也不要执行会写入仓库的命令。
+        本工作台只产出开发计划，不在这里编码实现。
+
+        工单编号：\(ticket.issueNumber)
+        标题：\(ticket.title)
+        描述：
+        \(ticket.displayDescription)
+
+        用户提供的已知信息：
+        \(helperContext.isEmpty ? "未提供" : helperContext)
+
+        拆解强度：\(intensity.rawValue)（\(intensity.caption)）
+        已提问数：\(askedCount)
+        \(estimateHint)
+
+        已有对话：
+        \(transcript)
+
+        规则：
+        1. 只问会改变方案方向的关键决策（范围边界、主路径、角色权限、数据来源、必须兼容的约束等）。
+        2. 标题、描述、辅助信息和对话里已经写明的内容，不要再确认。
+        3. 非关键细节（文案微调、次要空状态措辞、颜色、图标）自行做合理假设，写入最终文档的「假设」。
+        4. 每次回复只能做一件事：要么输出下一个问题，要么输出完整开发文档。不要寒暄。
+        5. \(finishRule)
+        6. 若同一轮发现多个仍不清楚、且都会改变方案方向的点，可以合并成一个问题一并问清（例如给出 2–3 个选项），但只输出一个问题块。
+        7. 若描述含 Wiki/文档/设计稿链接，尽量阅读；读不到则基于现有信息假设并写入「假设」。
+        8. 不要执行 git commit、git pull、git push，也不要修改知识库工单。
+        9. 「开发计划」必须写成资深工程师交给普通开发的实施说明：对照仓库现有代码写清改哪些模块/文件、怎么改、先后顺序、每步如何验证。禁止「增加接口」「改前端」这类空话；看完的人应能直接动手，不必再猜方案。
+
+        若继续提问，最终回复必须完整包含以下标记（标题行原样输出）：
+
+        DEVFLOW_PLANNING_QUESTION:
+        <一个问题；必要时把多个不清楚的点合并进这一问>
+
+        DEVFLOW_QUESTION_INDEX: <从 1 开始的当前题号>
+
+        若输出文档，最终回复必须完整包含：
+
+        DEVFLOW_PLAN_DOCUMENT:
+        # 需求描述
+        <精简需求说明>
+
+        ## 验收清单
+        ### 核心流程
+        - [ ] <可验证项>
+        ### 异常情况
+        - [ ] <可验证项>
+        ### 空状态
+        - [ ] <可验证项>
+        ### 加载状态
+        - [ ] <可验证项>
+        ### 不同设备适配
+        - [ ] <可验证项>
+
+        ## 假设
+        - <你替用户做的合理假设>
+
+        ## 本次范围
+        - <做哪些>
+
+        ## 明确不做
+        - <不做哪些>
+
+        ## 开发计划
+        ### 改动范围
+        - <仓库里真实模块/文件路径；复用什么、新增什么>
+
+        ### 分步实现
+        1. <步骤名>
+           - 做法：<接口/字段/状态/调用关系，具体到类或函数>
+           - 涉及：<文件路径>
+           - 验证：<这一步如何确认做对>
+
+        ### 注意点
+        - <顺序依赖、不要改的地方、易踩的坑；没有则写「无」>
+        """
+    }
+
+    static func formatPlanningTranscript(_ messages: [PlanningMessage]) -> String {
+        if messages.isEmpty { return "（尚无问答）" }
+        return messages.map { message in
+            switch message.role {
+            case .assistant: "分析师：\(message.content)"
+            case .user: "用户：\(message.content)"
+            }
+        }.joined(separator: "\n\n")
+    }
+
+    static func parseRequirementPlanningTurn(_ text: String) -> RequirementPlanningTurn? {
+        if isProtocolTemplateEcho(text) { return nil }
+
+        if text.contains("DEVFLOW_PLAN_DOCUMENT:") {
+            let document = section("DEVFLOW_PLAN_DOCUMENT:", until: nil, in: text)
+            guard isMeaningfulPlanningDocument(document) else { return nil }
+            return .document(document)
+        }
+
+        guard text.contains("DEVFLOW_PLANNING_QUESTION:") else { return nil }
+        let question = section("DEVFLOW_PLANNING_QUESTION:", until: "DEVFLOW_QUESTION_INDEX:", in: text)
+        let questionText = question.isEmpty
+            ? section("DEVFLOW_PLANNING_QUESTION:", until: "DEVFLOW_QUESTION_TOTAL:", in: text)
+            : question
+        guard isMeaningfulProtocolSection(questionText) else { return nil }
+
+        let index = parsePlanningNumber("DEVFLOW_QUESTION_INDEX:", in: text) ?? 1
+        let total = parsePlanningNumber("DEVFLOW_QUESTION_TOTAL:", in: text)
+        return .question(text: questionText, index: max(1, index), total: total.map { max(index, $0) })
+    }
+
+    static func isMeaningfulPlanningDocument(_ text: String) -> Bool {
+        guard isMeaningfulProtocolSection(text) else { return false }
+        let required = [
+            "验收清单", "核心流程", "异常", "空状态", "加载",
+            "假设", "范围", "不做", "开发计划",
+            "改动范围", "分步实现", "注意点", "做法", "涉及"
+        ]
+        return required.allSatisfy { text.contains($0) }
+    }
+
+    private static func parsePlanningNumber(_ marker: String, in text: String) -> Int? {
+        guard let range = text.range(of: marker) else { return nil }
+        let remainder = text[range.upperBound...]
+        let line = remainder.prefix(while: { $0 != "\n" })
+        let digits = line.filter(\.isNumber)
+        return Int(digits)
+    }
+
     /// 将 Cursor Plan 模式的 markdown 方案包装为 DevFlow 分析协议，便于统一闸门与展示。
     static func wrapCursorPlanAsAnalysisProtocol(_ planMarkdown: String) -> String {
         let plan = planMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -622,15 +798,20 @@ enum PromptBuilder {
                 && isMeaningfulProtocolSection(reasoning)
                 && isMeaningfulProtocolSection(tests)
                 && isMeaningfulProtocolSection(risks)
+        case .planning:
+            return parseRequirementPlanningTurn(text) != nil
         }
     }
 
     /// 是否为 prompt 模板或整段 stdout 误提取（非模型真实输出）。
     static func isProtocolTemplateEcho(_ text: String) -> Bool {
         if text.contains("最终回复必须完整包含以下固定段落") { return true }
+        if text.contains("每次回复只能做一件事") { return true }
         if text.contains("\"type\":\"user\"") || text.contains("\"type\": \"user\"") { return true }
         if text.contains("\"type\":\"thinking\"") || text.contains("\"type\": \"thinking\"") { return true }
         if text.contains("<根因>") || text.contains("<修改了什么>") { return true }
+        if text.contains("<仓库里真实模块/文件路径") { return true }
+        if text.contains("<接口/字段/状态/调用关系") { return true }
         if text.contains("说明问题根因（含从标题/描述/链接中提炼的关键信息）") { return true }
         if text.contains("简要说明修改了什么。") && text.contains("说明根因以及为什么这样修改。") { return true }
         // 误把整份 stream-json 日志当成方案
@@ -655,6 +836,10 @@ enum PromptBuilder {
         switch phase {
         case .analysis: startMarker = "DEVFLOW_ROOT_CAUSE:"
         case .modification: startMarker = "DEVFLOW_SUMMARY:"
+        case .planning:
+            startMarker = text.contains("DEVFLOW_PLAN_DOCUMENT:")
+                ? "DEVFLOW_PLAN_DOCUMENT:"
+                : "DEVFLOW_PLANNING_QUESTION:"
         }
         guard let range = text.range(of: startMarker) else { return nil }
         return String(text[range.lowerBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
