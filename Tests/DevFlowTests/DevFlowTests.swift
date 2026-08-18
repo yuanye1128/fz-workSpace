@@ -1122,6 +1122,24 @@ final class DevFlowTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: summaryURL, encoding: .utf8), expected)
     }
 
+    func testProjectNavigationStatusCaptionShowsIndexedMetricsOnly() {
+        let metrics = ProjectNavigationMetrics(sourceFileCount: 12, indexedSymbolCount: 80, indexedEdgeCount: 40)
+        let caption = "12 文件 · 80 符号 · 40 关系"
+        let recommended = ProjectNavigationStatus.updateRecommended(
+            generatedAt: Date(),
+            aiSummaryProvider: nil,
+            metrics: metrics
+        )
+        let current = ProjectNavigationStatus.current(
+            generatedAt: Date(),
+            aiSummaryProvider: nil,
+            metrics: metrics
+        )
+        XCTAssertEqual(recommended.statusCaption, caption)
+        XCTAssertEqual(current.statusCaption, caption)
+        XCTAssertEqual(ProjectNavigationStatus.notGenerated.statusCaption, "未生成；生成后会自动用于工单")
+    }
+
     func testProjectNavigationFreshnessIgnoresOrdinarySourceChanges() throws {
         let repositoryURL = try makeProjectNavigationFixture()
         defer { try? FileManager.default.removeItem(at: repositoryURL) }

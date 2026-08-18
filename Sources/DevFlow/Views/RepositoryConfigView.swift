@@ -155,21 +155,13 @@ private struct RepositoryRow: View {
     }
 
     private var projectNavigationStatusText: String {
-        switch projectNavigationStatus {
-        case .notGenerated:
-            return "未生成；生成后会自动用于工单"
-        case let .current(generatedAt, _, metrics):
-            return "已生成 · \(metrics.conciseDescription) · \(generatedAt.devFlowRelativeText)"
-        case let .updateRecommended(generatedAt, _, metrics):
-            return "导航资料建议更新 · \(metrics.conciseDescription) · 上次：\(generatedAt.devFlowRelativeText)"
-        }
+        projectNavigationStatus.statusCaption
     }
 
     private var projectNavigationStatusColor: Color {
         switch projectNavigationStatus {
         case .notGenerated: .secondary
-        case .current: DevFlowTheme.success
-        case .updateRecommended: DevFlowTheme.warning
+        case .current, .updateRecommended: DevFlowTheme.success
         }
     }
 

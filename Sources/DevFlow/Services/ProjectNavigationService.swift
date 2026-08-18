@@ -15,6 +15,15 @@ enum ProjectNavigationStatus: Equatable {
     case notGenerated
     case current(generatedAt: Date, aiSummaryProvider: AIProvider?, metrics: ProjectNavigationMetrics)
     case updateRecommended(generatedAt: Date, aiSummaryProvider: AIProvider?, metrics: ProjectNavigationMetrics)
+
+    var statusCaption: String {
+        switch self {
+        case .notGenerated:
+            return "未生成；生成后会自动用于工单"
+        case let .current(_, _, metrics), let .updateRecommended(_, _, metrics):
+            return metrics.conciseDescription
+        }
+    }
 }
 
 struct ProjectNavigationGenerationResult {
