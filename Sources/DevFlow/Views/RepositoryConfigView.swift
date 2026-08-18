@@ -50,7 +50,7 @@ struct RepositoryConfigView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("项目与仓库配置")
                     .font(.system(size: 25, weight: .bold))
-                Text("为每个知识库项目配置一个或多个本地 Git 仓库")
+                Text("为每个知识库项目配置本地 Git 仓库并生成自动项目导航")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }
@@ -134,7 +134,48 @@ private struct RepositoryRow: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var currentBranch = ""
     @State private var isLoadingBranch = true
+    @State private var projectNavigationStatus: ProjectNavigationStatus = .notGenerated
+    @State private var isGeneratingProjectNavigation = false
+    @State private var projectNavigationProgress = ProjectNavigationProgress(
+        fractionCompleted: 0,
+        message: "准备生成导航"
+    )
+    @State private var projectNavigationError: String?
     let repository: RepositoryConfig
+
+    private var workgraphPath: String {
+        ProjectNavigationService.workgraphPath(for: repository.path)
+    }
+
+    private var projectNavigationActionTitle: String {
+        switch projectNavigationStatus {
+        case .notGenerated: "生成导航"
+        case .current, .updateRecommended: "更新导航"
+        }
+    }
+
+    private var projectNavigationStatusText: String {
+        switch projectNavigationStatus {
+        case .notGenerated:
+            return "未生成；生成后会自动用于工单"
+        case let .current(generatedAt, _, metrics):
+            return "已生成 · \(metrics.conciseDescription) · \(generatedAt.devFlowRelativeText)"
+        case let .updateRecommended(generatedAt, _, metrics):
+            return "导航资料建议更新 · \(metrics.conciseDescription) · 上次：\(generatedAt.devFlowRelativeText)"
+        }
+    }
+
+    private var projectNavigationStatusColor: Color {
+        switch projectNavigationStatus {
+        case .notGenerated: .secondary
+        case .current: DevFlowTheme.success
+        case .updateRecommended: DevFlowTheme.warning
+        }
+    }
+
+    private var projectNavigationProgressPercent: Int {
+        Int((projectNavigationProgress.fractionCompleted * 100).rounded())
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -193,11 +234,101 @@ private struct RepositoryRow: View {
                 }
                 .buttonStyle(SecondaryButtonStyle())
             }
+
+            Divider()
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("自动项目导航").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Image(systemName: "point.3.connected.trianglepath.dotted")
+                            .foregroundStyle(isGeneratingProjectNavigation ? DevFlowTheme.accent : projectNavigationStatusColor)
+                        if isGeneratingProjectNavigation {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 8) {
+                                    Text(projectNavigationProgress.message)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                    Spacer(minLength: 6)
+                                    Text("\(projectNavigationProgressPercent)%")
+                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                                ProgressView(value: projectNavigationProgress.fractionCompleted)
+                                    .progressViewStyle(.linear)
+                                    .tint(DevFlowTheme.accent)
+                            }
+                        } else {
+                            Text(projectNavigationStatusText)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(projectNavigationStatusColor)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(minWidth: isGeneratingProjectNavigation ? 230 : 160, alignment: .leading)
+                    .frame(height: isGeneratingProjectNavigation ? 43 : 29)
+                    .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 6))
+                }
+                Spacer()
+                if !isGeneratingProjectNavigation {
+                    if case .notGenerated = projectNavigationStatus {
+                        EmptyView()
+                    } else {
+                        Button {
+                            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: workgraphPath)
+                        } label: {
+                            Image(systemName: "folder")
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                        .help("在 Finder 中显示自动项目导航")
+                        .accessibilityLabel("在 Finder 中显示自动项目导航")
+                    }
+                    Button(projectNavigationActionTitle) {
+                        Task { await generateProjectNavigation() }
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                }
+            }
         }
         .padding(18)
         .background(DevFlowTheme.surface(colorScheme), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(DevFlowTheme.border(colorScheme)))
-        .task { await refreshBranch(updateStored: true) }
+        .task {
+            projectNavigationStatus = ProjectNavigationService().status(for: repository.path)
+            await refreshBranch(updateStored: true)
+        }
+        .alert("生成项目导航失败", isPresented: Binding(
+            get: { projectNavigationError != nil },
+            set: { if !$0 { projectNavigationError = nil } }
+        )) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text(projectNavigationError ?? "")
+        }
+    }
+
+    private func generateProjectNavigation() async {
+        isGeneratingProjectNavigation = true
+        projectNavigationProgress = ProjectNavigationProgress(fractionCompleted: 0, message: "准备生成导航")
+        projectNavigationError = nil
+        defer { isGeneratingProjectNavigation = false }
+
+        do {
+            _ = try await ProjectNavigationService().generate(
+                repositoryPath: repository.path,
+                progress: { update in
+                    Task { @MainActor in
+                        projectNavigationProgress = update
+                    }
+                }
+            )
+            projectNavigationStatus = ProjectNavigationService().status(for: repository.path)
+        } catch {
+            projectNavigationError = error.localizedDescription
+        }
     }
 
     private func refreshBranch(updateStored: Bool) async {

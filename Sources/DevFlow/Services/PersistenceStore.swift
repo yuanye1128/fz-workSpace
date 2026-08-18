@@ -85,10 +85,15 @@ final class PersistenceStore: @unchecked Sendable {
     private let fileURL: URL
     private let cookiesURL: URL
 
-    init(fileManager: FileManager = .default) {
+    init(fileManager: FileManager = .default, directoryURL: URL? = nil) {
         self.fileManager = fileManager
-        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let directory = base.appendingPathComponent("DevFlow", isDirectory: true)
+        let directory: URL
+        if let directoryURL {
+            directory = directoryURL
+        } else {
+            let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            directory = base.appendingPathComponent("DevFlow", isDirectory: true)
+        }
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         fileURL = directory.appendingPathComponent("state.json")
         cookiesURL = directory.appendingPathComponent("kb-cookies.json")

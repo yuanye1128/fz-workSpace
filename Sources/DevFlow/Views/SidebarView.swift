@@ -51,7 +51,6 @@ struct SidebarView: View {
 
             VStack(spacing: 5) {
                 navigationRow(.repositories)
-                navigationRow(.agent)
                 navigationRow(.settings)
             }
             .padding(.horizontal, 10)

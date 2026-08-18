@@ -33,6 +33,19 @@
 		CB55E94BE025D0AB9932FA11 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 455A65685AA42ADD72894F32 /* Components.swift */; };
 		FB31103CC57A046E52787E64 /* KnowledgeBaseSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 388FD5D91F9BED680601D214 /* KnowledgeBaseSession.swift */; };
 		FB621DD9B1ABA18A88160EEE /* ProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D65E25B6687F5836C6249AC /* ProcessRunner.swift */; };
+		B1C2D3E4F5A60718293A4B5C /* ProjectNavigationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5C /* ProjectNavigationService.swift */; };
+		B1C2D3E4F5A60718293A4B5D /* WorkGraphStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5D /* WorkGraphStore.swift */; };
+		B1C2D3E4F5A60718293A4B5E /* WorkGraphModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5E /* WorkGraphModels.swift */; };
+		B1C2D3E4F5A60718293A4B5F /* WorkGraphParserRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5F /* WorkGraphParserRuntime.swift */; };
+		B1C2D3E4F5A60718293A4B610 /* WorkGraphResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B610 /* WorkGraphResolver.swift */; };
+		C84B6A907F1E4D2C99E3A6B2 /* WorkGraphBridgeResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = C84B6A907F1E4D2C99E3A6B1 /* WorkGraphBridgeResolver.swift */; };
+		B1C2D3E4F5A60718293A4B611 /* WorkGraphRuntimeLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B611 /* WorkGraphRuntimeLocator.swift */; };
+		B1C2D3E4F5A60718293A4B614 /* WorkGraphAutoSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B614 /* WorkGraphAutoSyncCoordinator.swift */; };
+		B1C2D3E4F5A60718293A4B615 /* WorkGraphProjectMCPConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B615 /* WorkGraphProjectMCPConfiguration.swift */; };
+		E5C9D1A74B638F20A95172D3 /* WorkGraphContextBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C9D1A74B638F20A95172D2 /* WorkGraphContextBuilder.swift */; };
+		A3F6D26891C742F28B4DE105 /* WorkGraphQueryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3F6D26891C742F28B4DE104 /* WorkGraphQueryService.swift */; };
+		D4C3B2A19087654321FEDCBA /* WorkGraphMCPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C3B2A19087654321FEDCBB /* WorkGraphMCPServer.swift */; };
+		B1C2D3E4F5A60718293A4B612 /* Resources in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B612 /* Resources */; };
 		FD742EF81502F318510D59D3 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 466FDC7416DFBE7FEE8D406D /* Models.swift */; };
 /* End PBXBuildFile section */
 
@@ -40,6 +53,19 @@
 		0A5DBE56C0DA54A68200B3B5 /* AIReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIReportView.swift; sourceTree = "<group>"; };
 		0D3143C886460B4686D0E0A4 /* ExternalAgentLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalAgentLauncher.swift; sourceTree = "<group>"; };
 		0D65E25B6687F5836C6249AC /* ProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessRunner.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B5C /* ProjectNavigationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectNavigationService.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B5D /* WorkGraphStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkGraphStore.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B5E /* WorkGraphModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkGraphModels.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B5F /* WorkGraphParserRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkGraphParserRuntime.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B610 /* WorkGraphResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkGraphResolver.swift; sourceTree = "<group>"; };
+		C84B6A907F1E4D2C99E3A6B1 /* WorkGraphBridgeResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkGraphBridgeResolver.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B611 /* WorkGraphRuntimeLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkGraphRuntimeLocator.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B614 /* WorkGraphAutoSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkGraphAutoSyncCoordinator.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B615 /* WorkGraphProjectMCPConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkGraphProjectMCPConfiguration.swift; sourceTree = "<group>"; };
+		E5C9D1A74B638F20A95172D2 /* WorkGraphContextBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkGraphContextBuilder.swift; sourceTree = "<group>"; };
+		A3F6D26891C742F28B4DE104 /* WorkGraphQueryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkGraphQueryService.swift; sourceTree = "<group>"; };
+		D4C3B2A19087654321FEDCBB /* WorkGraphMCPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkGraphMCPServer.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B612 /* Resources */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources; sourceTree = "<group>"; };
 		160A8516E70DD18EC18BE5B3 /* TicketDetailModal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TicketDetailModal.swift; sourceTree = "<group>"; };
 		1CC4D79BD2BB9E401954883D /* PersistenceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceStore.swift; sourceTree = "<group>"; };
 		1E9103E78E2CCCFBF5AA158F /* TicketBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TicketBoardView.swift; sourceTree = "<group>"; };
@@ -98,6 +124,18 @@
 				388FD5D91F9BED680601D214 /* KnowledgeBaseSession.swift */,
 				1CC4D79BD2BB9E401954883D /* PersistenceStore.swift */,
 				0D65E25B6687F5836C6249AC /* ProcessRunner.swift */,
+				A1B2C3D4E5F60718293A4B5C /* ProjectNavigationService.swift */,
+				A1B2C3D4E5F60718293A4B5D /* WorkGraphStore.swift */,
+				A1B2C3D4E5F60718293A4B5E /* WorkGraphModels.swift */,
+				A1B2C3D4E5F60718293A4B5F /* WorkGraphParserRuntime.swift */,
+				A1B2C3D4E5F60718293A4B610 /* WorkGraphResolver.swift */,
+				C84B6A907F1E4D2C99E3A6B1 /* WorkGraphBridgeResolver.swift */,
+				A1B2C3D4E5F60718293A4B611 /* WorkGraphRuntimeLocator.swift */,
+				A1B2C3D4E5F60718293A4B614 /* WorkGraphAutoSyncCoordinator.swift */,
+				A1B2C3D4E5F60718293A4B615 /* WorkGraphProjectMCPConfiguration.swift */,
+				E5C9D1A74B638F20A95172D2 /* WorkGraphContextBuilder.swift */,
+				A3F6D26891C742F28B4DE104 /* WorkGraphQueryService.swift */,
+				D4C3B2A19087654321FEDCBB /* WorkGraphMCPServer.swift */,
 				DA107082C023645613A1E4ED /* RequirementPlanner.swift */,
 			);
 			path = Services;
@@ -109,6 +147,7 @@
 				E7F20C4627192619E92E7E3F /* Assets.xcassets */,
 				EFA1B28058BEC2F8CB6AC366 /* DevFlowApp.swift */,
 				8E461DEF914920E56A5734EA /* Info.plist */,
+				A1B2C3D4E5F60718293A4B612 /* Resources */,
 				7DA3B05D9E7A2E2230038778 /* Models */,
 				487A492C752FA0890A4A858F /* Services */,
 				C2E912EA2F1AFE0558933265 /* Views */,
@@ -212,6 +251,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				877EB37E30704DA908E3133E /* Assets.xcassets in Resources */,
+				B1C2D3E4F5A60718293A4B612 /* Resources in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -238,6 +278,18 @@
 				FD742EF81502F318510D59D3 /* Models.swift in Sources */,
 				7EC6F506F30759DF770FEEB6 /* PersistenceStore.swift in Sources */,
 				FB621DD9B1ABA18A88160EEE /* ProcessRunner.swift in Sources */,
+				B1C2D3E4F5A60718293A4B5C /* ProjectNavigationService.swift in Sources */,
+				B1C2D3E4F5A60718293A4B5D /* WorkGraphStore.swift in Sources */,
+				B1C2D3E4F5A60718293A4B5E /* WorkGraphModels.swift in Sources */,
+				B1C2D3E4F5A60718293A4B5F /* WorkGraphParserRuntime.swift in Sources */,
+				B1C2D3E4F5A60718293A4B610 /* WorkGraphResolver.swift in Sources */,
+				C84B6A907F1E4D2C99E3A6B2 /* WorkGraphBridgeResolver.swift in Sources */,
+				B1C2D3E4F5A60718293A4B611 /* WorkGraphRuntimeLocator.swift in Sources */,
+				B1C2D3E4F5A60718293A4B614 /* WorkGraphAutoSyncCoordinator.swift in Sources */,
+				B1C2D3E4F5A60718293A4B615 /* WorkGraphProjectMCPConfiguration.swift in Sources */,
+				E5C9D1A74B638F20A95172D3 /* WorkGraphContextBuilder.swift in Sources */,
+				A3F6D26891C742F28B4DE105 /* WorkGraphQueryService.swift in Sources */,
+				D4C3B2A19087654321FEDCBA /* WorkGraphMCPServer.swift in Sources */,
 				5B98F78A2803AAFB7BEEF0A5 /* RepositoryConfigView.swift in Sources */,
 				01B5343D0BBBF5E27C2D4067 /* RequirementPlanner.swift in Sources */,
 				4FE87E84309AFCEA437A115F /* RequirementPlanningView.swift in Sources */,

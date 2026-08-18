@@ -581,6 +581,7 @@ struct TicketDetailModal: View {
                     openInExternalAgent(repository: selectedRepository)
                 } else {
                     Task {
+                        let taskHelperContext = helperContextWithWorkGraphContext(for: selectedRepository)
                         await appState.jobCoordinator.start(
                             ticket: ticket,
                             repository: selectedRepository,
@@ -588,7 +589,8 @@ struct TicketDetailModal: View {
                             provider: provider,
                             modelID: effectiveModelID,
                             reasoningEffort: effectiveReasoningEffort,
-                            helperContext: helperContext
+                            helperContext: taskHelperContext,
+                            navigationMaterialPath: nil
                         )
                     }
                 }
@@ -658,6 +660,7 @@ struct TicketDetailModal: View {
     }
 
     private func startRequirementPlanning(repository: RepositoryConfig) {
+        let taskHelperContext = helperContextWithWorkGraphContext(for: repository)
         appState.requirementPlanner.start(
             ticket: ticket,
             repository: repository,
@@ -665,7 +668,8 @@ struct TicketDetailModal: View {
             provider: provider,
             modelID: effectiveModelID,
             reasoningEffort: effectiveReasoningEffort,
-            helperContext: helperContext,
+            helperContext: taskHelperContext,
+            navigationMaterialPath: nil,
             intensity: planningIntensity
         )
     }
@@ -681,8 +685,10 @@ struct TicketDetailModal: View {
                         ticket: ticket,
                         repositoryPath: repository.path,
                         branch: branch,
-                        helperContext: helperContext,
-                        provider: provider
+                        helperContext: helperContextWithWorkGraphContext(for: repository),
+                        navigationMaterialPath: nil,
+                        provider: provider,
+                        enableWorkGraphMCP: provider == .cursor
                     )
                 )
                 await MainActor.run {
@@ -694,6 +700,20 @@ struct TicketDetailModal: View {
                 }
             }
         }
+    }
+
+    private func helperContextWithWorkGraphContext(for repository: RepositoryConfig) -> String {
+        let base = helperContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query = [ticket.title, ticket.displayDescription, base]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        guard let graphContext = ProjectNavigationService().graphAgentContext(
+            for: repository.path,
+            query: query
+        ) else {
+            return base
+        }
+        return base.isEmpty ? graphContext.promptSection : base + "\n" + graphContext.promptSection
     }
 
     private func configureDefaults() {
@@ -727,8 +747,10 @@ struct TicketDetailModal: View {
 
     private func openCustomAgent() {
         guard let custom = selectedCustomProvider else { return }
-        let additionalContext = helperContext.isEmpty ? "无" : helperContext
-        let context = "请处理以下工单：\n\n标题：\(ticket.title)\n类型：\(ticket.kind.rawValue)\n优先级：\(ticket.priority.rawValue)\n描述：\n\(ticket.displayDescription)\n\n补充信息：\n\(additionalContext)"
+        let additionalContext = selectedRepository.map(helperContextWithWorkGraphContext(for:))
+            ?? helperContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        let contextText = additionalContext.isEmpty ? "无" : additionalContext
+        let context = "请处理以下工单：\n\n标题：\(ticket.title)\n类型：\(ticket.kind.rawValue)\n优先级：\(ticket.priority.rawValue)\n描述：\n\(ticket.displayDescription)\n\n补充信息：\n\(contextText)"
         appState.agentInitialPrompt = context
         appState.agentSelectedProviderID = custom.id
         appState.closeTicketModal()
@@ -797,6 +819,8 @@ private struct WorkItemContent: View {
 
     /// 用户点击步骤条回看时的步骤；nil 表示跟随当前真实阶段
     @State private var reviewedStepIndex: Int?
+    @State private var renderedLiveOutput = ""
+    @State private var hasInitializedLiveOutput = false
 
     private var visibleLogs: [JobLogEntry] {
         item.logs.filter { entry in
@@ -842,6 +866,9 @@ private struct WorkItemContent: View {
         }
         .onChange(of: item.stage) { _ in
             reviewedStepIndex = nil
+        }
+        .task(id: liveOutputText ?? "") {
+            await animateLiveOutput(to: liveOutputText ?? "")
         }
     }
 
@@ -941,8 +968,8 @@ private struct WorkItemContent: View {
             }
 
             HStack {
-                Button("返回配置") {
-                    appState.jobCoordinator.requestRevision(itemID: item.id)
+                Button("放弃本轮并重新分析") {
+                    appState.jobCoordinator.abandonPlanAndRestart(itemID: item.id)
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 Spacer()
@@ -1003,6 +1030,49 @@ private struct WorkItemContent: View {
 
             if includeWorkflowStrip {
                 JobStageStrip(current: item.stage)
+            }
+
+            if isLiveOutputActive || (liveOutputText?.isEmpty == false) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 7) {
+                        Image(systemName: "waveform")
+                            .foregroundStyle(DevFlowTheme.accent)
+                        SectionLabel(title: "AI 实时处理")
+                        Spacer()
+                    }
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(renderedLiveOutput)
+                                    .font(.system(size: 12))
+                                    .lineSpacing(4)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                if isLiveOutputActive {
+                                    TimelineView(.periodic(from: .now, by: 0.45)) { context in
+                                        let dotCount = Int(context.date.timeIntervalSinceReferenceDate / 0.45) % 3 + 1
+                                        Text("正在生成实时内容" + String(repeating: ".", count: dotCount))
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id("latest-live-output")
+                            }
+                        }
+                        .frame(maxHeight: 230)
+                        .padding(13)
+                        .background(DevFlowTheme.accent.opacity(colorScheme == .dark ? 0.08 : 0.045), in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(DevFlowTheme.accent.opacity(0.25)))
+                        .onAppear { proxy.scrollTo("latest-live-output", anchor: .bottom) }
+                        .onChange(of: renderedLiveOutput) { _ in
+                            withAnimation(.easeOut(duration: 0.16)) {
+                                proxy.scrollTo("latest-live-output", anchor: .bottom)
+                            }
+                        }
+                    }
+                }
             }
 
             VStack(alignment: .leading, spacing: 10) {
@@ -1110,6 +1180,39 @@ private struct WorkItemContent: View {
             return item.errorMessage ?? "\(item.provider.rawValue) 正在处理 \(ticket.issueNumber)，你可以在此查看实时进度。"
         }
     }
+
+    private var liveOutputText: String? {
+        switch item.stage {
+        case .preparing, .analyzing, .awaitingPlanApproval:
+            return item.analysisOutput
+        default:
+            return item.codingOutput ?? item.analysisOutput
+        }
+    }
+
+    private var isLiveOutputActive: Bool {
+        item.stage == .analyzing || item.stage == .runningAI
+    }
+
+    @MainActor
+    private func animateLiveOutput(to target: String) async {
+        if !hasInitializedLiveOutput {
+            renderedLiveOutput = target
+            hasInitializedLiveOutput = true
+            return
+        }
+        guard target != renderedLiveOutput else { return }
+        guard target.hasPrefix(renderedLiveOutput) else {
+            renderedLiveOutput = target
+            return
+        }
+        let suffix = target.dropFirst(renderedLiveOutput.count)
+        for character in suffix {
+            if Task.isCancelled { return }
+            renderedLiveOutput.append(character)
+            try? await Task.sleep(nanoseconds: 8_000_000)
+        }
+    }
 }
 
 private struct AIAnalysisPlanView: View {
@@ -1194,8 +1297,8 @@ private struct AIAnalysisPlanView: View {
             Divider()
 
             HStack {
-                Button("返回配置") {
-                    appState.jobCoordinator.requestRevision(itemID: item.id)
+                Button("放弃方案并重新分析") {
+                    appState.jobCoordinator.abandonPlanAndRestart(itemID: item.id)
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 Spacer()

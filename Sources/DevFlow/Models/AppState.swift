@@ -52,7 +52,7 @@ final class AppState: ObservableObject {
 
     static let localTestTicketIDBase = 9_000_000
 
-    let persistence = PersistenceStore()
+    let persistence: PersistenceStore
     lazy var knowledgeBaseSession = KnowledgeBaseSessionController()
     lazy var jobCoordinator = JobCoordinator(appState: self)
     lazy var requirementPlanner = RequirementPlanner(appState: self)
@@ -61,7 +61,8 @@ final class AppState: ObservableObject {
     private var automaticSyncLoopStarted = false
     private var systemThemeObserver: NSObjectProtocol?
 
-    init() {
+    init(persistence: PersistenceStore = PersistenceStore()) {
+        self.persistence = persistence
         if let storedTheme = UserDefaults.standard.string(forKey: "themePreference"),
            let preference = ThemePreference(rawValue: storedTheme) {
             // 直接赋值会触发 didSet；先静默写入再统一 apply

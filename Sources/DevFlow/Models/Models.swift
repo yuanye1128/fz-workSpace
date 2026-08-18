@@ -92,6 +92,7 @@ struct RequirementPlanSession: Identifiable, Codable, Equatable, Sendable {
     var repositoryPath: String
     var branch: String
     var helperContext: String
+    var navigationMaterialPath: String? = nil
     var messages: [PlanningMessage] = []
     var phase: RequirementPlanningPhase
     var askedCount: Int = 0
@@ -318,6 +319,7 @@ struct RepositoryConfig: Identifiable, Codable, Hashable {
     var defaultBranch: String
     var remoteName: String = "origin"
     var isDefault: Bool = false
+    var navigationMaterialPath: String? = nil
 }
 
 enum AIProvider: String, Codable, CaseIterable, Identifiable {
@@ -577,6 +579,7 @@ struct WorkItem: Identifiable, Codable, Equatable {
     /// merge 冲突时保留的临时 worktree，供用户手工处理。
     var mergeWorktreePath: String? = nil
     var helperContext: String
+    var navigationMaterialPath: String? = nil
     var stage: JobStage
     var logs: [JobLogEntry]
     var analysisPlan: String?
@@ -584,6 +587,9 @@ struct WorkItem: Identifiable, Codable, Equatable {
     var commitHash: String?
     var errorMessage: String?
     var execution: AIExecutionRecord? = nil
+    /// CLI 流式正文，分别保存分析和编码阶段，便于关闭页面后继续回看。
+    var analysisOutput: String? = nil
+    var codingOutput: String? = nil
     var createdAt = Date()
     var updatedAt = Date()
 

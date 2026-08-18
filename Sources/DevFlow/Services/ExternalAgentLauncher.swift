@@ -7,8 +7,12 @@ enum ExternalAgentLauncher {
         var repositoryPath: String
         var branch: String
         var helperContext: String
+        var navigationMaterialPath: String? = nil
         var provider: AIProvider
         var developmentDocument: String? = nil
+        /// Project-level MCP is opt-in. The UI sets this only when the user
+        /// explicitly hands the task to Cursor; other clients remain unchanged.
+        var enableWorkGraphMCP: Bool = false
     }
 
     enum LaunchError: LocalizedError {
@@ -30,6 +34,8 @@ enum ExternalAgentLauncher {
 
     @discardableResult
     static func launch(_ context: TaskContext) throws -> URL {
+        var context = context
+        context.repositoryPath = try validatedRepositoryPath(context.repositoryPath)
         let taskFileURL = try writeTaskFile(for: context)
         let prompt = launchPrompt(taskFileURL: taskFileURL, context: context)
         NSPasteboard.general.clearContents()
@@ -37,7 +43,11 @@ enum ExternalAgentLauncher {
 
         switch context.provider {
         case .cursor:
-            try openCursor(repositoryPath: context.repositoryPath, taskFilePath: taskFileURL.path)
+            try openCursor(
+                repositoryPath: context.repositoryPath,
+                taskFilePath: taskFileURL.path,
+                enableWorkGraphMCP: context.enableWorkGraphMCP
+            )
         case .codex:
             try openCodexApp(repositoryPath: context.repositoryPath)
         case .claude:
@@ -61,6 +71,7 @@ enum ExternalAgentLauncher {
 
     static func taskFileMarkdown(for context: TaskContext) -> String {
         let helper = context.helperContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        let navigationMaterial = NavigationMaterialContext.markdownSection(path: context.navigationMaterialPath)
         let source = context.ticket.sourceURL?.absoluteString ?? "无"
         let header = """
         # DevFlow \(context.ticket.kind.rawValue)任务
@@ -82,6 +93,7 @@ enum ExternalAgentLauncher {
             ## 协作说明
 
             工作台已完成需求拆解。请按下方开发计划直接实施，不要重新澄清需求；计划已写到可动手的粒度，按步骤改对应文件，非关键细节以「假设」为准，不要扩大「明确不做」中的范围。
+            \(navigationMaterial)
 
             \(document)
             """
@@ -97,6 +109,7 @@ enum ExternalAgentLauncher {
         ## 辅助定位
 
         \(helper.isEmpty ? "未提供" : helper)
+        \(navigationMaterial)
 
         ## 协作说明
 
@@ -152,7 +165,28 @@ enum ExternalAgentLauncher {
         }
     }
 
-    private static func openCursor(repositoryPath: String, taskFilePath: String) throws {
+    private static func openCursor(
+        repositoryPath: String,
+        taskFilePath: String,
+        enableWorkGraphMCP: Bool
+    ) throws {
+        let mcpTransaction: WorkGraphProjectMCPConfiguration.Transaction?
+        if enableWorkGraphMCP {
+            guard let executablePath = Bundle.main.executableURL?.path else {
+                throw LaunchError.launchFailed("无法定位 DevFlow WorkGraph MCP 可执行文件")
+            }
+            do {
+                mcpTransaction = try WorkGraphProjectMCPConfiguration.install(
+                    repositoryPath: repositoryPath,
+                    executablePath: executablePath
+                )
+            } catch {
+                throw LaunchError.launchFailed(error.localizedDescription)
+            }
+        } else {
+            mcpTransaction = nil
+        }
+
         let candidates = [
             "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
             NSHomeDirectory() + "/.local/bin/cursor",
@@ -167,11 +201,13 @@ enum ExternalAgentLauncher {
                 try process.run()
                 return
             } catch {
+                try? mcpTransaction?.rollback()
                 throw LaunchError.launchFailed("打开 Cursor 失败：\(error.localizedDescription)")
             }
         }
 
         guard FileManager.default.fileExists(atPath: "/Applications/Cursor.app") else {
+            try? mcpTransaction?.rollback()
             throw LaunchError.launchFailed("未找到 Cursor 应用，请先安装 Cursor")
         }
 
@@ -181,8 +217,22 @@ enum ExternalAgentLauncher {
         do {
             try process.run()
         } catch {
+            try? mcpTransaction?.rollback()
             throw LaunchError.launchFailed("打开 Cursor 失败：\(error.localizedDescription)")
         }
+    }
+
+    private static func validatedRepositoryPath(_ rawPath: String) throws -> String {
+        let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/") else { throw LaunchError.missingRepository }
+        let url = URL(fileURLWithPath: trimmed, isDirectory: true)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw LaunchError.missingRepository
+        }
+        return url.path
     }
 
     private static func openClaude(repositoryPath: String, prompt: String) throws {

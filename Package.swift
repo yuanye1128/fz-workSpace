@@ -14,6 +14,7 @@ let package = Package(
         .executableTarget(
             name: "DevFlow",
             path: "Sources/DevFlow",
+            resources: [.copy("Resources")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(

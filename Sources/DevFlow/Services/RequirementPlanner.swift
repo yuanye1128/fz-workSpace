@@ -18,6 +18,7 @@ final class RequirementPlanner {
         modelID: String?,
         reasoningEffort: String?,
         helperContext: String,
+        navigationMaterialPath: String?,
         intensity: RequirementPlanningIntensity
     ) {
         guard ticket.kind.usesRequirementPlanning else { return }
@@ -32,6 +33,8 @@ final class RequirementPlanner {
             repositoryPath: repository.path,
             branch: branch,
             helperContext: helperContext,
+            // Navigation is converted to a bounded evidence block before the session starts.
+            navigationMaterialPath: nil,
             phase: .compiling
         )
         appState.addOrUpdate(planningSession: session)
@@ -99,8 +102,10 @@ final class RequirementPlanner {
                 repositoryPath: session.repositoryPath,
                 branch: session.branch,
                 helperContext: session.helperContext,
+                navigationMaterialPath: nil,
                 provider: session.provider,
-                developmentDocument: document
+                developmentDocument: document,
+                enableWorkGraphMCP: session.provider == .cursor
             )
         )
     }
@@ -118,6 +123,7 @@ final class RequirementPlanner {
                     ticket: ticket,
                     repositoryPath: session.repositoryPath,
                     helperContext: session.helperContext,
+                    navigationMaterialPath: nil,
                     mode: .requirementPlanning(
                         intensity: session.intensity,
                         askedCount: session.askedCount,

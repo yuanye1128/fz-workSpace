@@ -21,6 +21,9 @@ struct DevFlowApp: App {
         if let configurationPath = DurableExecutionWorker.configurationPath(from: CommandLine.arguments) {
             Darwin.exit(DurableExecutionWorker.run(configurationPath: configurationPath))
         }
+        if CommandLine.arguments.contains(WorkGraphMCPServer.commandLineFlag) {
+            Darwin.exit(WorkGraphMCPServer.runStdio())
+        }
         _appState = StateObject(wrappedValue: AppState())
     }
 

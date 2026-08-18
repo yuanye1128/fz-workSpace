@@ -22,7 +22,8 @@ final class JobCoordinator {
         provider: AIProvider,
         modelID: String?,
         reasoningEffort: String?,
-        helperContext: String
+        helperContext: String,
+        navigationMaterialPath: String?
     ) async {
         guard appState.activeWorkItem(for: ticket.id) == nil else { return }
         guard !ticket.kind.usesRequirementPlanning else { return }
@@ -47,6 +48,9 @@ final class JobCoordinator {
             taskBranch: taskBranch,
             worktreePath: worktreePath,
             helperContext: helperContext,
+            // WorkGraph evidence is folded into helperContext before a job starts.
+            // Never persist or re-inject a free-form navigation directory path.
+            navigationMaterialPath: nil,
             stage: .preparing,
             logs: [JobLogEntry(message: "正在检查仓库：\(repository.displayName)")]
         )
@@ -79,6 +83,7 @@ final class JobCoordinator {
                     ticket: ticket,
                     repositoryPath: item.workingDirectory,
                     helperContext: item.helperContext,
+                    navigationMaterialPath: nil,
                     mode: .modification(confirmedPlan: item.analysisPlan ?? ""),
                     onStarted: { [weak self] execution in
                         await self?.recordStartedExecution(execution, for: item.id)
@@ -140,6 +145,7 @@ final class JobCoordinator {
                     ticket: ticket,
                     repositoryPath: item.workingDirectory,
                     helperContext: mergedHelper,
+                    navigationMaterialPath: nil,
                     mode: .analysisRevision(previousPlan: previousPlan, userNote: note),
                     onStarted: { [weak self] execution in
                         await self?.recordStartedExecution(execution, for: item.id)
@@ -209,6 +215,7 @@ final class JobCoordinator {
                     ticket: ticket,
                     repositoryPath: item.workingDirectory,
                     helperContext: item.helperContext,
+                    navigationMaterialPath: nil,
                     mode: .analysis,
                     onStarted: { [weak self] execution in
                         await self?.recordStartedExecution(execution, for: item.id)
@@ -313,6 +320,19 @@ final class JobCoordinator {
 
     func dismiss(itemID: UUID) {
         updateItem(itemID) { $0.stage = .cancelled }
+    }
+
+    func abandonPlanAndRestart(itemID: UUID) {
+        guard item(id: itemID)?.stage == .awaitingPlanApproval else { return }
+        Task {
+            await cleanupWorktreesIfNeeded(itemID: itemID, deleteTaskBranch: true)
+            updateItem(itemID) {
+                $0.stage = .cancelled
+                $0.execution = nil
+                $0.logs.append(JobLogEntry(message: "用户放弃本轮方案，已清理任务 worktree，可重新开始分析"))
+                $0.updatedAt = Date()
+            }
+        }
     }
 
     func requestRevision(itemID: UUID) {
@@ -634,13 +654,25 @@ final class JobCoordinator {
     }
 
     private func handle(_ event: AIExecutionStreamEvent, for itemID: UUID) {
-        guard let message = event.displayMessage, !message.isEmpty else { return }
+        guard event.displayMessage?.isEmpty == false || event.contentText?.isEmpty == false else { return }
         updateItem(itemID) {
             $0.execution?.lastOutputOffset = event.byteOffset
             if $0.execution?.state != .recovered {
                 $0.execution?.state = .running
             }
-            $0.logs.append(JobLogEntry(message: message))
+            if let message = event.displayMessage, !message.isEmpty {
+                $0.logs.append(JobLogEntry(message: message))
+            }
+            if let content = event.contentText?.trimmingCharacters(in: .whitespacesAndNewlines), !content.isEmpty {
+                let existing = $0.execution?.phase == .analysis ? ($0.analysisOutput ?? "") : ($0.codingOutput ?? "")
+                let combined = existing.isEmpty ? content : existing + "\n\n" + content
+                let trimmed = String(combined.suffix(20_000))
+                if $0.execution?.phase == .analysis {
+                    $0.analysisOutput = trimmed
+                } else {
+                    $0.codingOutput = trimmed
+                }
+            }
             $0.updatedAt = Date()
         }
     }
