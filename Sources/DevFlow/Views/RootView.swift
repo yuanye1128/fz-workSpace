@@ -44,6 +44,8 @@ struct RootView: View {
                         AgentChatView()
                     case .settings:
                         SettingsView()
+                    case .workload:
+                        WorkloadView(scanStore: appState.workloadScan)
                     default:
                         TicketBoardView()
                     }

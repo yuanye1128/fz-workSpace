@@ -17,6 +17,7 @@ struct SidebarView: View {
                 navigationRow(.processing)
                 navigationRow(.approval)
                 navigationRow(.completed)
+                navigationRow(.workload)
             }
             .padding(.horizontal, 10)
 

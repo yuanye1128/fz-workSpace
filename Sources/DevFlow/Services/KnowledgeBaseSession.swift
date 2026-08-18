@@ -25,13 +25,19 @@ final class KnowledgeBaseSessionController: NSObject, ObservableObject, WKNaviga
     @Published var isLoading = false
 
     private var navigationContinuation: CheckedContinuation<Void, Error>?
+    private var workloadItemHandler: ((WorkloadIssueExtract) -> Void)?
+    private let workloadMessageRelay: WorkloadScriptRelay
 
     override init() {
+        let relay = WorkloadScriptRelay()
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        configuration.userContentController.add(relay, name: "devflowWorkload")
         webView = WKWebView(frame: .zero, configuration: configuration)
+        workloadMessageRelay = relay
         super.init()
+        relay.owner = self
         webView.navigationDelegate = self
         webView.allowsBackForwardNavigationGestures = true
     }
@@ -353,6 +359,127 @@ final class KnowledgeBaseSessionController: NSObject, ObservableObject, WKNaviga
         return value as? Bool ?? false
     }
 
+    func prepareForWorkloadScan(knowledgeBaseURL: String, persistence: PersistenceStore) async throws {
+        await restorePersistedCookies(using: persistence)
+        guard let url = URL(string: knowledgeBaseURL) else {
+            throw KnowledgeBaseError.parseFailed("知识库地址无效")
+        }
+        if webView.url == nil || webView.url?.host != url.host {
+            try await load(url)
+        }
+        let loginRequired = try await evaluateBoolean(
+            #"Boolean(document.querySelector('#login-form, form[action*="/login"]')) || location.pathname.includes('/login')"#
+        )
+        if loginRequired { throw KnowledgeBaseError.loginRequired }
+        try await injectWorkloadExtractorIfNeeded()
+    }
+
+    func extractWorkloadActivityPage(url: String) async throws -> WorkloadActivityPageExtract {
+        try await injectWorkloadExtractorIfNeeded()
+        let value = try await webView.callAsyncJavaScript(
+            "return JSON.stringify(await window.__devflowWorkload.extractActivityPage(pageURL));",
+            arguments: ["pageURL": url],
+            in: nil,
+            contentWorld: .page
+        )
+        return try decodeWorkloadJSON(value)
+    }
+
+    func extractWorkloadIssueTimelines(
+        urls: [String],
+        concurrency: Int = 12,
+        onItem: ((WorkloadIssueExtract) -> Void)? = nil
+    ) async throws -> [WorkloadIssueExtract] {
+        guard !urls.isEmpty else { return [] }
+        try await injectWorkloadExtractorIfNeeded()
+        workloadItemHandler = onItem
+        defer { workloadItemHandler = nil }
+        _ = try await webView.evaluateJavaScript("window.__devflowWorkloadAbort = false")
+        let value: Any?
+        do {
+            value = try await withTaskCancellationHandler {
+                try await webView.callAsyncJavaScript(
+                    "return JSON.stringify(await window.__devflowWorkload.extractIssueTimelines(urls, concurrency));",
+                    arguments: ["urls": urls, "concurrency": concurrency],
+                    in: nil,
+                    contentWorld: .page
+                )
+            } onCancel: { [webView] in
+                Task { @MainActor in
+                    _ = try? await webView.evaluateJavaScript("window.__devflowWorkloadAbort = true")
+                }
+            }
+        } catch {
+            _ = try? await webView.evaluateJavaScript("window.__devflowWorkloadAbort = true")
+            throw error
+        }
+        return try decodeWorkloadJSON(value)
+    }
+
+    fileprivate func handleWorkloadScriptMessage(_ message: WKScriptMessage) {
+        guard message.name == "devflowWorkload" else { return }
+        let extract: WorkloadIssueExtract?
+        if let json = message.body as? String {
+            let decoded: WorkloadIssueExtract? = try? decodeWorkloadJSON(json)
+            extract = decoded
+        } else if JSONSerialization.isValidJSONObject(message.body),
+                  let data = try? JSONSerialization.data(withJSONObject: message.body) {
+            extract = try? JSONDecoder().decode(WorkloadIssueExtract.self, from: data)
+        } else {
+            extract = nil
+        }
+        if let extract {
+            workloadItemHandler?(extract)
+        }
+    }
+
+    private var didInjectWorkloadExtractor = false
+
+    private func injectWorkloadExtractorIfNeeded() async throws {
+        if didInjectWorkloadExtractor {
+            let ready = try await evaluateBoolean("Boolean(window.__devflowWorkload && window.__devflowWorkload.extractActivityPage)")
+            if ready { return }
+        }
+        let source = try Self.workloadExtractorSource()
+        _ = try await webView.evaluateJavaScript(source)
+        didInjectWorkloadExtractor = true
+    }
+
+    private func decodeWorkloadJSON<Value: Decodable>(_ value: Any?) throws -> Value {
+        guard let json = value as? String, let data = json.data(using: .utf8) else {
+            throw KnowledgeBaseError.parseFailed("工作量扫描没有返回可解析的数据")
+        }
+        return try JSONDecoder().decode(Value.self, from: data)
+    }
+
+    private static func workloadExtractorSource() throws -> String {
+        #if SWIFT_PACKAGE
+        let bundles = [Bundle.module, Bundle.main]
+        #else
+        let bundles = [Bundle.main]
+        #endif
+        for bundle in bundles {
+            let candidates = [
+                bundle.url(forResource: "workload-extractor", withExtension: "js", subdirectory: "Resources"),
+                bundle.url(forResource: "workload-extractor", withExtension: "js"),
+                bundle.resourceURL?.appendingPathComponent("workload-extractor.js"),
+                bundle.resourceURL?.appendingPathComponent("Resources/workload-extractor.js")
+            ].compactMap { $0 }
+            for url in candidates where FileManager.default.isReadableFile(atPath: url.path) {
+                return try String(contentsOf: url, encoding: .utf8)
+            }
+        }
+        throw KnowledgeBaseError.parseFailed("未找到工作量解析脚本")
+    }
+
+}
+
+private final class WorkloadScriptRelay: NSObject, WKScriptMessageHandler {
+    weak var owner: KnowledgeBaseSessionController?
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        owner?.handleWorkloadScriptMessage(message)
+    }
 }
 
 private struct KBResponse: Decodable {

@@ -53,6 +53,7 @@ final class AppState: ObservableObject {
     static let localTestTicketIDBase = 9_000_000
 
     let persistence: PersistenceStore
+    let workloadScan = WorkloadScanStore()
     lazy var knowledgeBaseSession = KnowledgeBaseSessionController()
     lazy var jobCoordinator = JobCoordinator(appState: self)
     lazy var requirementPlanner = RequirementPlanner(appState: self)
@@ -178,7 +179,7 @@ final class AppState: ObservableObject {
                     guard activeWorkItem(for: ticket.id)?.stage.requiresUserApproval == true else { return false }
                 case .completed:
                     break
-                case .repositories, .agent, .settings:
+                case .repositories, .agent, .settings, .workload:
                     return false
                 }
                 if !searchText.isEmpty {
