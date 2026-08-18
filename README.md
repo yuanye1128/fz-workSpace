@@ -61,6 +61,12 @@ fz-workSpace/
 
 ## 构建与测试
 
+首次克隆后先拉取 WorkGraph 内置 Node。该二进制超过 GitHub 的 100 MB 限制，因此不入库；构建时仍会打进 App：
+
+```bash
+./scripts/fetch-workgraph-node.sh
+```
+
 ### Swift Package
 
 ```bash

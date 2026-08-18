@@ -1,6 +1,8 @@
 .build/
 Build/
 DerivedData/
+Sources/DevFlow/Resources/WorkGraphRuntime/node-arm64
+Sources/DevFlow/Resources/WorkGraphRuntime/node-x86_64
 *.xcuserstate
 xcuserdata/
 .DS_Store
